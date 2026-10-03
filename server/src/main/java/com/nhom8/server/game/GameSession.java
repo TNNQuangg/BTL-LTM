@@ -680,7 +680,7 @@ public class GameSession {
      * Kết thúc trận đấu: lưu kết quả vào DB, cập nhật bảng xếp hạng,
      * gửi bảng tổng kết cho cả phòng.
      */
-    public void endGame() {
+    public synchronized void endGame() {
         if (!gameActive) return;
         gameActive = false;
         stopCountdown();

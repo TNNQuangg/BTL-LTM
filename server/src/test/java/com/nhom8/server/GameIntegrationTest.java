@@ -65,7 +65,7 @@ public class GameIntegrationTest {
         }
         
         if (roomId == null) {
-            System.err.println("Room creation failed or room ID not found. Using default 'R1000' (might fail if dynamic)");
+            System.err.println("Room creation failed or room ID not found. Using default 'R1000'");
             roomId = "R1000"; // fallback
         }
 
@@ -76,6 +76,13 @@ public class GameIntegrationTest {
         bots.get(2).sendRoomJoin(roomId);
         Thread.sleep(1000);
 
+        // 3.5 Set Room draw time to 5 seconds to speed up test
+        Envelope settings = new Envelope(MessageType.ROOM_SETTINGS);
+        settings.put("drawTime", 5);
+        settings.put("maxRounds", 1);
+        bots.get(0).send(settings);
+        Thread.sleep(500);
+
         // 4. All bots ready
         for (BotClient bot : bots) {
             bot.sendReady();
@@ -84,24 +91,38 @@ public class GameIntegrationTest {
         // 5. Game start phase (Wait for TOPIC_OPTIONS and send TOPIC_SELECT)
         Thread.sleep(2000);
         for (BotClient bot : bots) {
-            bot.sendTopicSelect();
+            bot.sendTopicSelect("con mèo");
         }
 
         // 6. Draw phase
-        Thread.sleep(1500);
+        Thread.sleep(2000);
         for (BotClient bot : bots) {
             bot.sendDrawing();
         }
 
-        // 7. Guess phase - simulate guesses
-        Thread.sleep(3000); // Allow round processing
-        System.out.println("Test simulated successfully.");
+        // 7. Guess phase - wait for drawing phase to finish and guessing phase to start
+        Thread.sleep(4000); // Wait for draw timeout (5s total)
+        
+        // Wait for all 3 paintings to finish (each takes ~15s total if not guessed, total ~45s)
+        boolean gameFinished = false;
+        for (int i = 0; i < 45; i++) {
+            Thread.sleep(1000);
+            for (Envelope env : bots.get(0).getReceivedMessages()) {
+                if (env.getType() == MessageType.GAME_RESULT) {
+                    gameFinished = true;
+                    break;
+                }
+            }
+            if (gameFinished) break;
+        }
+
+        System.out.println("Test simulated successfully. Game Finished: " + gameFinished);
         
         for (BotClient bot : bots) {
             bot.disconnect();
         }
         
-        assertTrue(true, "Integration test completed.");
+        assertTrue(gameFinished, "Integration test should reach GAME_RESULT.");
     }
 
     private static class BotClient extends TextWebSocketHandler {
@@ -132,6 +153,13 @@ public class GameIntegrationTest {
             if (env != null) {
                 receivedMessages.offer(env);
                 allMessages.add(env);
+                
+                if (env.getType() == MessageType.GUESS_START) {
+                    try {
+                        sendGuess("con chó");
+                        sendGuess("con mèo");
+                    } catch (Exception e) {}
+                }
             }
         }
 
@@ -142,14 +170,12 @@ public class GameIntegrationTest {
         }
 
         public void sendRegisterAndLogin() throws Exception {
-            // Register
             Envelope reg = new Envelope(MessageType.REGISTER);
             reg.put("username", username);
             reg.put("password", password);
             send(reg);
             Thread.sleep(200);
 
-            // Login
             Envelope login = new Envelope(MessageType.LOGIN);
             login.put("username", username);
             login.put("password", password);
@@ -170,15 +196,21 @@ public class GameIntegrationTest {
             send(new Envelope(MessageType.READY));
         }
 
-        public void sendTopicSelect() throws Exception {
+        public void sendTopicSelect(String topic) throws Exception {
             Envelope env = new Envelope(MessageType.TOPIC_SELECT);
-            env.put("topic", "con mèo"); // Fallback
+            env.put("topic", topic);
             send(env);
         }
 
         public void sendDrawing() throws Exception {
             Envelope env = new Envelope(MessageType.STROKE_BATCH);
-            env.put("drawData", new ArrayList<>()); // empty drawing
+            env.put("drawData", new ArrayList<>());
+            send(env);
+        }
+
+        public void sendGuess(String guess) throws Exception {
+            Envelope env = new Envelope(MessageType.GUESS_SUBMIT);
+            env.setContent(guess);
             send(env);
         }
         
@@ -189,7 +221,7 @@ public class GameIntegrationTest {
         }
         
         public List<Envelope> getReceivedMessages() {
-            return allMessages;
+            return new ArrayList<>(allMessages);
         }
     }
 }
