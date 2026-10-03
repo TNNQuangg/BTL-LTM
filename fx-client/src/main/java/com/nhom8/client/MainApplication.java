@@ -31,6 +31,9 @@ public class MainApplication extends Application {
         showLoginScreen();
     }
 
+    private Button loginBtn;
+    private Label statusLabel;
+
     private void showLoginScreen() {
         VBox root = new VBox(15);
         root.setAlignment(Pos.CENTER);
@@ -40,25 +43,42 @@ public class MainApplication extends Application {
         titleLabel.setStyle("-fx-font-size: 36px; -fx-font-weight: bold; -fx-text-fill: white; -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.4), 5, 0, 0, 2);");
 
         TextField usernameField = new TextField();
-        usernameField.setPromptText("Tên đăng nhập");
+        usernameField.setPromptText("Tên đăng nhập (3-30 ký tự)");
         usernameField.setMaxWidth(250);
 
         PasswordField passwordField = new PasswordField();
         passwordField.setPromptText("Mật khẩu");
         passwordField.setMaxWidth(250);
 
-        Button loginBtn = new Button("Đăng nhập");
-        loginBtn.setStyle("-fx-background-color: white; -fx-text-fill: #F5B800; -fx-font-weight: bold; -fx-font-size: 14px;");
-        
+        loginBtn = new Button("Đăng nhập");
+        loginBtn.setStyle("-fx-background-color: white; -fx-text-fill: #F5B800; -fx-font-weight: bold; -fx-font-size: 14px; -fx-cursor: hand;");
+
+        statusLabel = new Label("");
+        statusLabel.setStyle("-fx-text-fill: #D8000C; -fx-font-weight: bold;");
+
         loginBtn.setOnAction(e -> {
-            String user = usernameField.getText();
+            String user = usernameField.getText() != null ? usernameField.getText().trim() : "";
             String pass = passwordField.getText();
-            if (!user.isEmpty() && !pass.isEmpty()) {
-                connectAndLogin(user, pass);
+            
+            // Kiểm tra tính hợp lệ dữ liệu ngay tại Client
+            if (user.isEmpty() || !user.matches("^[a-zA-Z0-9_]{3,30}$")) {
+                statusLabel.setStyle("-fx-text-fill: #D8000C; -fx-font-weight: bold;");
+                statusLabel.setText("Tên đăng nhập không hợp lệ (3-30 ký tự, không chứa ký tự lạ)!");
+                return;
             }
+            if (pass == null || pass.isEmpty() || pass.length() > 64) {
+                statusLabel.setStyle("-fx-text-fill: #D8000C; -fx-font-weight: bold;");
+                statusLabel.setText("Mật khẩu không được để trống (tối đa 64 ký tự)!");
+                return;
+            }
+
+            statusLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
+            statusLabel.setText("Đang kết nối tới máy chủ...");
+            loginBtn.setDisable(true);
+            connectAndLogin(user, pass);
         });
 
-        root.getChildren().addAll(titleLabel, usernameField, passwordField, loginBtn);
+        root.getChildren().addAll(titleLabel, usernameField, passwordField, loginBtn, statusLabel);
 
         Scene scene = new Scene(root, 800, 600);
         primaryStage.setScene(scene);
@@ -66,25 +86,27 @@ public class MainApplication extends Application {
     }
 
     private void connectAndLogin(String username, String password) {
-        if (webSocketClient == null || !webSocketClient.isConnected()) {
+        if (webSocketClient == null) {
             webSocketClient = new GameWebSocketClient("ws://localhost:8080/ws/game", envelope -> {
                 Platform.runLater(() -> handleMessage(envelope));
             });
-            webSocketClient.connect();
         }
 
-        // Đợi một chút để WS kết nối (nên làm promise/callback ở thực tế)
-        new Thread(() -> {
-            try {
-                Thread.sleep(500); // Đợi WS connect thành công
+        webSocketClient.connect().thenAccept(ws -> {
+            if (ws != null) {
+                Platform.runLater(() -> statusLabel.setText("Đang xác thực thông tin..."));
                 Envelope loginEnv = new Envelope(MessageType.LOGIN);
                 loginEnv.put("username", username);
                 loginEnv.put("password", password);
                 webSocketClient.send(loginEnv);
-            } catch (Exception e) {
-                e.printStackTrace();
+            } else {
+                Platform.runLater(() -> {
+                    loginBtn.setDisable(false);
+                    statusLabel.setStyle("-fx-text-fill: #D8000C; -fx-font-weight: bold;");
+                    statusLabel.setText("Không thể kết nối máy chủ (ws://localhost:8080/ws/game)!");
+                });
             }
-        }).start();
+        });
     }
 
     private LobbyScreen lobbyScreen;
@@ -97,10 +119,14 @@ public class MainApplication extends Application {
     private void handleMessage(Envelope envelope) {
         if (envelope.getType() == MessageType.LOGIN_RESULT) {
             if (envelope.isSuccess()) {
-                Alert alert = new Alert(Alert.AlertType.INFORMATION, "Đăng nhập thành công!");
-                alert.show();
+                if (statusLabel != null) statusLabel.setText("");
                 showLobbyScreen();
             } else {
+                if (loginBtn != null) loginBtn.setDisable(false);
+                if (statusLabel != null) {
+                    statusLabel.setStyle("-fx-text-fill: #D8000C; -fx-font-weight: bold;");
+                    statusLabel.setText(envelope.getContent());
+                }
                 Alert alert = new Alert(Alert.AlertType.ERROR, envelope.getContent());
                 alert.show();
             }
