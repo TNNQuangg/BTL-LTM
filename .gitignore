@@ -1,0 +1,26 @@
+# Maven
+target/
+*.jar
+*.war
+*.ear
+*.class
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+.settings/
+.classpath
+.project
+
+# React / Node (if any leftovers)
+node_modules/
+dist/
+build/
+.env
+
+# OS generated files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,71 @@
+package com.nhom8.vehinhdoany.security;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.util.StringUtils;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import javax.servlet.FilterChain;
+import javax.servlet.ServletException;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
+
+import org.springframework.stereotype.Component;
+
+@Component
+public class JwtAuthenticationFilter extends OncePerRequestFilter {
+
+    private final JwtTokenProvider tokenProvider;
+    private final CustomUserDetailsService customUserDetailsService;
+
+    public JwtAuthenticationFilter(JwtTokenProvider tokenProvider, CustomUserDetailsService customUserDetailsService) {
+        this.tokenProvider = tokenProvider;
+        this.customUserDetailsService = customUserDetailsService;
+    }
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
+        try {
+            // 1. Lấy token từ header Authorization: Bearer <token>
+            String jwt = getJwtFromRequest(request);
+
+            // 2. Kiểm tra token có hợp lệ không
+            if (StringUtils.hasText(jwt) && tokenProvider.validateToken(jwt)) {
+                // 3. Lấy username từ token
+                String username = tokenProvider.getUsernameFromJWT(jwt);
+
+                // 4. Lấy thông tin user từ database
+                UserDetails userDetails = customUserDetailsService.loadUserByUsername(username);
+                if (userDetails != null) {
+                    // Tạo đối tượng Authentication cho Spring Security
+                    UsernamePasswordAuthenticationToken authentication =
+                            new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+                    
+                    authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+
+                    // Lưu thông tin đăng nhập vào Context của ứng dụng
+                    SecurityContextHolder.getContext().setAuthentication(authentication);
+                }
+            }
+        } catch (Exception ex) {
+            logger.error("Không thể xác thực người dùng với JWT", ex);
+        }
+
+        // Cho phép request đi tiếp tới Controller
+        filterChain.doFilter(request, response);
+    }
+
+    // Hàm phụ trợ: Lấy chuỗi token từ header
+    private String getJwtFromRequest(HttpServletRequest request) {
+        String bearerToken = request.getHeader("Authorization");
+        if (StringUtils.hasText(bearerToken) && bearerToken.startsWith("Bearer ")) {
+            return bearerToken.substring(7); // Cắt bỏ chữ "Bearer " (7 ký tự)
+        }
+        return null;
+    }
+}
