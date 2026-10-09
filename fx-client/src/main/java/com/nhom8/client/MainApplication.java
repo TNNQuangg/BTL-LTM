@@ -19,15 +19,14 @@ public class MainApplication extends Application {
 
     private GameWebSocketClient webSocketClient;
     private Stage primaryStage;
+    private String currentUsername = "";
+    private String currentDisplayName = "";
+    private String lastEnteredUsername = "";
 
     @Override
     public void start(Stage primaryStage) {
         this.primaryStage = primaryStage;
         primaryStage.setTitle("Scribble It! - Nhóm 8");
-
-        // Load custom font if needed
-        // Font.loadFont(getClass().getResourceAsStream("/fonts/gameScribble.ttf"), 14);
-
         showLoginScreen();
     }
 
@@ -75,6 +74,7 @@ public class MainApplication extends Application {
             statusLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
             statusLabel.setText("Đang kết nối tới máy chủ...");
             loginBtn.setDisable(true);
+            lastEnteredUsername = user;
             connectAndLogin(user, pass);
         });
 
@@ -110,15 +110,37 @@ public class MainApplication extends Application {
     }
 
     private LobbyScreen lobbyScreen;
+    private com.nhom8.client.ui.RoomScreen roomScreen;
     private GameScreen gameScreen;
 
     public GameWebSocketClient getWsClient() {
         return webSocketClient;
     }
 
+    public String getCurrentUsername() {
+        return currentUsername;
+    }
+
+    public String getCurrentDisplayName() {
+        return currentDisplayName != null && !currentDisplayName.isEmpty() ? currentDisplayName : currentUsername;
+    }
+
+    public Stage getPrimaryStage() {
+        return primaryStage;
+    }
+
     private void handleMessage(Envelope envelope) {
         if (envelope.getType() == MessageType.LOGIN_RESULT) {
             if (envelope.isSuccess()) {
+                if (envelope.getData() != null && envelope.getData().has("player")) {
+                    com.fasterxml.jackson.databind.JsonNode playerNode = envelope.getData().get("player");
+                    if (playerNode.has("username")) currentUsername = playerNode.get("username").asText();
+                    if (playerNode.has("displayName")) currentDisplayName = playerNode.get("displayName").asText();
+                }
+                if (currentUsername == null || currentUsername.isEmpty()) {
+                    currentUsername = lastEnteredUsername;
+                    currentDisplayName = lastEnteredUsername;
+                }
                 if (statusLabel != null) statusLabel.setText("");
                 showLobbyScreen();
             } else {
@@ -130,10 +152,16 @@ public class MainApplication extends Application {
                 Alert alert = new Alert(Alert.AlertType.ERROR, envelope.getContent());
                 alert.show();
             }
-        } else if (lobbyScreen != null && primaryStage.getScene() == lobbyScreen.getScene()) {
-            lobbyScreen.handleMessage(envelope);
+        } else if (envelope.getType() == MessageType.ROOM_DISSOLVED) {
+            Alert alert = new Alert(Alert.AlertType.INFORMATION, envelope.getContent() != null ? envelope.getContent() : "Phòng đã bị giải tán.");
+            alert.show();
+            showLobbyScreen();
+        } else if (roomScreen != null && primaryStage.getScene() == roomScreen.getScene()) {
+            roomScreen.handleMessage(envelope);
         } else if (gameScreen != null && primaryStage.getScene() == gameScreen.getScene()) {
             gameScreen.handleMessage(envelope);
+        } else if (lobbyScreen != null && primaryStage.getScene() == lobbyScreen.getScene()) {
+            lobbyScreen.handleMessage(envelope);
         }
     }
 
@@ -142,6 +170,11 @@ public class MainApplication extends Application {
             lobbyScreen = new LobbyScreen(this);
         }
         primaryStage.setScene(lobbyScreen.createScene());
+    }
+
+    public void showRoomScreen(String roomId, String roomName) {
+        roomScreen = new com.nhom8.client.ui.RoomScreen(this, roomId, roomName);
+        primaryStage.setScene(roomScreen.createScene());
     }
 
     public void showGameScreen(String roomId) {
