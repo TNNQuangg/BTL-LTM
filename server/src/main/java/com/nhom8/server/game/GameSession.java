@@ -76,6 +76,9 @@ public class GameSession {
     /** Cờ đánh dấu trận đấu đang diễn ra */
     private boolean gameActive;
 
+    /** Vòng chơi hiện tại */
+    private int currentRound = 1;
+
     /** Bộ đếm nanoTime khi bắt đầu lượt đoán — dùng cho tính thời gian chính xác */
     private volatile long guessStartNanoTime;
 
@@ -147,6 +150,7 @@ public class GameSession {
      */
     public void startGame() {
         gameActive = true;
+        currentRound = 1;
         room.setStatus(Room.RoomStatus.PLAYING);
 
         // Cố định thứ tự người chơi
@@ -154,9 +158,19 @@ public class GameSession {
 
         // Tạo bản ghi trận đấu trong DB
         match = new Match(room.getRoomId());
-        getGameService().getMatchRepository().save(match);
+        try {
+            match = getGameService().getMatchRepository().save(match);
+        } catch (Exception e) {
+            System.err.println("[GameSession] Lỗi lưu Match vào DB: " + e.getMessage());
+            e.printStackTrace();
+        }
+
+        // Cập nhật sảnh chờ: phòng chuyển sang PLAYING, người chơi chuyển sang 'Đang chơi'
+        getGameService().broadcastPlayerList();
+        getGameService().broadcastRoomList();
 
         // Khởi tạo MatchResult cho mỗi người chơi
+        matchResults.clear();
         for (String username : playerOrder) {
             User user = getGameService().getUserRepository().findByUsername(username);
             MatchResult result = new MatchResult(match, user);
@@ -166,9 +180,42 @@ public class GameSession {
         // Thông báo trận đấu bắt đầu
         Envelope startMsg = new Envelope(MessageType.GAME_START);
         startMsg.put("playerOrder", new ArrayList<>(playerOrder));
+        startMsg.put("currentRound", currentRound);
+        startMsg.put("maxRounds", room.getMaxRounds());
         room.broadcast(startMsg);
 
-        // Bắt đầu giai đoạn chọn chủ đề
+        // Bắt đầu vòng 1
+        startNewRound();
+    }
+
+    /**
+     * Bắt đầu một vòng chơi mới (reset dữ liệu vẽ và chủ đề của vòng trước).
+     */
+    private void startNewRound() {
+        if (!gameActive) return;
+        stopCountdown();
+        cancelCurrentTimer();
+
+        // Đảm bảo loại bỏ người chơi đã out khỏi playerOrder
+        Set<String> activePlayers = room.getPlayerUsernames();
+        playerOrder.removeIf(u -> !activePlayers.contains(u));
+
+        if (playerOrder.size() < Room.MIN_PLAYERS) {
+            System.out.println("[GameSession] Không đủ người chơi để tiếp tục vòng mới");
+            endGame();
+            return;
+        }
+
+        // Reset dữ liệu vẽ và đoán của vòng cũ
+        selectedTopics.clear();
+        topicOptions.clear();
+        submittedDrawings.clear();
+        submittedPlayers.clear();
+        guessResults.clear();
+        correctGuessers.clear();
+        currentPaintingIndex = 0;
+
+        // Bắt đầu chọn chủ đề cho vòng mới
         startTopicSelection();
     }
 
@@ -194,6 +241,8 @@ public class GameSession {
             Envelope msg = new Envelope(MessageType.TOPIC_OPTIONS);
             msg.put("topics", new ArrayList<>(topics));
             msg.put("timeLimit", TOPIC_SELECT_TIME / 1000);
+            msg.put("currentRound", currentRound);
+            msg.put("maxRounds", room.getMaxRounds());
 
             ClientSession handler = room.getPlayer(username);
             if (handler != null) {
@@ -273,6 +322,8 @@ public class GameSession {
         int drawingTime = room.getDrawTime() * 1000;
         Envelope drawStartMsg = new Envelope(MessageType.DRAW_START);
         drawStartMsg.put("timeLimit", room.getDrawTime());
+        drawStartMsg.put("currentRound", currentRound);
+        drawStartMsg.put("maxRounds", room.getMaxRounds());
         room.broadcast(drawStartMsg);
 
         // Đếm ngược
@@ -280,20 +331,25 @@ public class GameSession {
 
         // Timer hết giờ vẽ
         currentTimer = scheduler.schedule(() -> {
-            // Người chưa nộp → coi như nộp tranh trắng
+            // Người chưa nộp → lấy dữ liệu nét vẽ hiện có (từ STROKE_BATCH) làm bài nộp
             for (String username : playerOrder) {
                 if (!submittedPlayers.contains(username)) {
-                    submittedDrawings.putIfAbsent(username, new ArrayList<>());
+                    submittedDrawings.putIfAbsent(username, Collections.synchronizedList(new ArrayList<>()));
                     submittedPlayers.add(username);
-                }
-                
-                // Lưu painting vào DB cho tất cả người chơi
-                String topic = selectedTopics.get(username);
-                User painter = getGameService().getUserRepository().findByUsername(username);
-                if (painter != null && topic != null) {
-                    Painting painting = new Painting(match, painter, topic);
-                    painting.setStrokeData(submittedDrawings.getOrDefault(username, new ArrayList<>()).toString());
-                    getGameService().getPaintingRepository().save(painting);
+
+                    // Lưu painting vào DB cho người chưa nộp thủ công — dùng JsonUtil.toJson()
+                    try {
+                        String topic = selectedTopics.get(username);
+                        User painter = getGameService().getUserRepository().findByUsername(username);
+                        if (painter != null && topic != null && match != null) {
+                            Painting painting = new Painting(match, painter, topic);
+                            painting.setStrokeData(JsonUtil.toJson(submittedDrawings.getOrDefault(username, new ArrayList<>())));
+                            getGameService().getPaintingRepository().save(painting);
+                        }
+                    } catch (Exception e) {
+                        System.err.println("[GameSession] Lỗi lưu painting vào DB khi hết giờ: " + e.getMessage());
+                        e.printStackTrace();
+                    }
                 }
             }
             startGuessingPhase();
@@ -341,13 +397,18 @@ public class GameSession {
         }
         submittedPlayers.add(username);
 
-        // Lưu painting vào DB
-        String topic = selectedTopics.get(username);
-        User painter = getGameService().getUserRepository().findByUsername(username);
-        if (painter != null && topic != null) {
-            Painting painting = new Painting(match, painter, topic);
-            painting.setStrokeData(submittedDrawings.getOrDefault(username, new ArrayList<>()).toString()); // Lưu dạng text
-            getGameService().getPaintingRepository().save(painting);
+        // Lưu painting vào DB — dùng JsonUtil.toJson() để lưu dạng JSON hợp lệ
+        try {
+            String topic = selectedTopics.get(username);
+            User painter = getGameService().getUserRepository().findByUsername(username);
+            if (painter != null && topic != null && match != null) {
+                Painting painting = new Painting(match, painter, topic);
+                painting.setStrokeData(JsonUtil.toJson(submittedDrawings.getOrDefault(username, new ArrayList<>())));
+                getGameService().getPaintingRepository().save(painting);
+            }
+        } catch (Exception e) {
+            System.err.println("[GameSession] Lỗi lưu painting vào DB khi nộp tranh: " + e.getMessage());
+            e.printStackTrace();
         }
 
         // Kiểm tra tất cả đã nộp → chuyển sang đoán sớm
@@ -375,10 +436,31 @@ public class GameSession {
      * Hiển thị bức tranh tiếp theo cho cả phòng đoán.
      */
     private void showNextPainting() {
+        if (!gameActive) return;
+
+        // Loại bỏ người chơi đã out khỏi playerOrder
+        Set<String> activePlayers = room.getPlayerUsernames();
+        playerOrder.removeIf(u -> !activePlayers.contains(u));
+
         if (currentPaintingIndex >= playerOrder.size()) {
-            // Đã đoán hết tất cả bức tranh → tổng kết
-            endGame();
-            return;
+            // Đã đoán hết tất cả bức tranh của vòng hiện tại!
+            if (currentRound < room.getMaxRounds()) {
+                currentRound++;
+                System.out.println("[GameSession] Hoàn thành vòng " + (currentRound - 1) + ". Chuẩn bị bắt đầu Vòng " + currentRound + "/" + room.getMaxRounds());
+
+                Envelope roundAnnounce = new Envelope(MessageType.ROOM_CHAT);
+                roundAnnounce.put("content", "🔔 ĐÃ HOÀN THÀNH VÒNG " + (currentRound - 1) + "! Chuẩn bị bắt đầu Vòng " + currentRound + "/" + room.getMaxRounds() + "...");
+                roundAnnounce.put("senderDisplayName", "HỆ THỐNG");
+                room.broadcast(roundAnnounce);
+
+                // Cho người chơi đọc thông báo 1.5 giây rồi chuyển sang chọn chủ đề vòng mới
+                scheduler.schedule(this::startNewRound, 1500, TimeUnit.MILLISECONDS);
+                return;
+            } else {
+                // Đã hoàn thành toàn bộ các vòng setting từ trước → Kết thúc trận
+                endGame();
+                return;
+            }
         }
 
         correctGuessers.clear();
@@ -398,6 +480,8 @@ public class GameSession {
         guessStartMsg.put("paintingIndex", currentPaintingIndex + 1);
         guessStartMsg.put("totalPaintings", playerOrder.size());
         guessStartMsg.put("timeLimit", guessingTime / 1000);
+        guessStartMsg.put("currentRound", currentRound);
+        guessStartMsg.put("maxRounds", room.getMaxRounds());
         room.broadcast(guessStartMsg);
 
         // Gửi dữ liệu bức tranh
@@ -405,6 +489,8 @@ public class GameSession {
         paintingMsg.put("painterUsername", painterUsername);
         paintingMsg.put("drawData", new ArrayList<>(drawData));
         paintingMsg.put("hint", hint);
+        paintingMsg.put("currentRound", currentRound);
+        paintingMsg.put("maxRounds", room.getMaxRounds());
         room.broadcast(paintingMsg);
 
         // Đếm ngược
@@ -627,6 +713,15 @@ public class GameSession {
         roundResult.put("correctCount", correctCount);
         roundResult.put("totalGuessers", totalGuessers);
         roundResult.put("earlyFinish", totalGuessers > 0 && correctCount == totalGuessers);
+        roundResult.put("currentRound", currentRound);
+        roundResult.put("maxRounds", room.getMaxRounds());
+        roundResult.put("paintingIndex", currentPaintingIndex + 1);
+        roundResult.put("totalPaintings", playerOrder.size());
+
+        boolean isEndOfRound = (currentPaintingIndex + 1 >= playerOrder.size());
+        boolean isLastRound = isEndOfRound && (currentRound >= room.getMaxRounds());
+        roundResult.put("isEndOfRound", isEndOfRound);
+        roundResult.put("isLastRound", isLastRound);
 
         // Bổ sung bảng điểm tổng lũy kế thời gian thực của mọi người chơi
         ArrayList<HashMap<String, Object>> currentScores = new ArrayList<>();
@@ -692,6 +787,7 @@ public class GameSession {
     /**
      * Kết thúc trận đấu: lưu kết quả vào DB, cập nhật bảng xếp hạng,
      * gửi bảng tổng kết cho cả phòng.
+     * Xóa dữ liệu của những người out giữa chừng, chỉ tổng kết cho người hoàn thành.
      */
     public synchronized void endGame() {
         if (!gameActive) return;
@@ -703,17 +799,33 @@ public class GameSession {
 
         // === Lưu kết quả vào DB ===
         match.endMatch();
-        getGameService().getMatchRepository().save(match);
+        try {
+            getGameService().getMatchRepository().save(match);
+        } catch (Exception e) {
+            System.err.println("[GameSession] Lỗi lưu match: " + e.getMessage());
+        }
 
-        List<MatchResult> allResults = new ArrayList<>(matchResults.values());
-        getGameService().getMatchResultRepository().saveAll(allResults);
+        // Xóa dữ liệu của những người out giữa chừng — chỉ giữ những người chơi còn lại trong phòng (hoàn thành trận đấu)
+        Set<String> activePlayers = room.getPlayerUsernames();
+        matchResults.keySet().removeIf(u -> !activePlayers.contains(u));
 
-        // === Cập nhật điểm hạng (ranking score) cho từng người chơi ===
-        for (MatchResult mr : allResults) {
+        List<MatchResult> validResults = new ArrayList<>(matchResults.values());
+        try {
+            getGameService().getMatchResultRepository().saveAll(validResults);
+        } catch (Exception e) {
+            System.err.println("[GameSession] Lỗi lưu MatchResult: " + e.getMessage());
+        }
+
+        // === Cập nhật điểm hạng (ranking score) CHỈ CHO người chơi hoàn thành trận đấu ===
+        for (MatchResult mr : validResults) {
             int totalPoints = mr.getTotalPoints();
             if (totalPoints > 0 && mr.getUser() != null) {
-                getGameService().getUserRepository().addRankingScore(
-                        mr.getUser().getUserId(), totalPoints);
+                try {
+                    getGameService().getUserRepository().addRankingScore(
+                            mr.getUser().getUserId(), totalPoints);
+                } catch (Exception e) {
+                    System.err.println("[GameSession] Lỗi addRankingScore: " + e.getMessage());
+                }
             }
         }
 
@@ -721,22 +833,25 @@ public class GameSession {
         Envelope gameResult = new Envelope(MessageType.GAME_RESULT);
 
         ArrayList<HashMap<String, Object>> scoreboard = new ArrayList<>();
-        allResults.sort((a, b) -> b.getTotalPoints() - a.getTotalPoints());
+        validResults.sort((a, b) -> b.getTotalPoints() - a.getTotalPoints());
         int rank = 1;
-        for (MatchResult mr : allResults) {
+        for (MatchResult mr : validResults) {
             HashMap<String, Object> entry = new HashMap<>();
             entry.put("rank", rank++);
             entry.put("username", mr.getUser() != null ? mr.getUser().getUsername() : "Người chơi");
+            entry.put("displayName", (mr.getUser() != null && mr.getUser().getDisplayName() != null && !mr.getUser().getDisplayName().isEmpty()) ? mr.getUser().getDisplayName() : (mr.getUser() != null ? mr.getUser().getUsername() : "Người chơi"));
             entry.put("pointsDrawn", mr.getPointsDrawn());
             entry.put("pointsGuess", mr.getPointsGuess());
             entry.put("totalPoints", mr.getTotalPoints());
             scoreboard.add(entry);
         }
         gameResult.put("scoreboard", scoreboard);
+        gameResult.put("totalRounds", room.getMaxRounds());
 
         // Thêm chi tiết từng bức tranh
         ArrayList<HashMap<String, Object>> paintingSummary = new ArrayList<>();
         for (String painter : playerOrder) {
+            if (!activePlayers.contains(painter)) continue;
             HashMap<String, Object> pInfo = new HashMap<>();
             pInfo.put("painterUsername", painter);
             pInfo.put("topic", selectedTopics.get(painter));
@@ -774,6 +889,68 @@ public class GameSession {
         // Cập nhật lobby
         getGameService().broadcastPlayerList();
         getGameService().broadcastRoomList();
+    }
+
+    /**
+     * Xử lý khi một người chơi out giữa chừng (disconnect hoặc rời phòng).
+     * Xoá toàn bộ dữ liệu của người chơi này khỏi trận đấu hiện tại.
+     */
+    public synchronized void onPlayerLeft(String username) {
+        if (!gameActive || username == null) return;
+        System.out.println("[GameSession] Người chơi out giữa chừng: " + username);
+
+        // Xóa dữ liệu của người out giữa chừng khỏi matchResults
+        matchResults.remove(username);
+        selectedTopics.remove(username);
+        topicOptions.remove(username);
+        submittedDrawings.remove(username);
+        submittedPlayers.remove(username);
+        correctGuessers.remove(username);
+
+        boolean wasCurrentPainter = false;
+        if (playerOrder != null && currentPaintingIndex >= 0 && currentPaintingIndex < playerOrder.size()) {
+            String currentPainter = playerOrder.get(currentPaintingIndex);
+            if (username.equalsIgnoreCase(currentPainter)) {
+                wasCurrentPainter = true;
+            }
+        }
+
+        if (playerOrder != null) {
+            playerOrder.remove(username);
+        }
+
+        // Nếu phòng không còn đủ người chơi (< 2), GameService sẽ dissolveRoom
+        if (room.getPlayerCount() < Room.MIN_PLAYERS) {
+            return;
+        }
+
+        // Nếu người thoát là painter của bức tranh đang chiếu, bỏ qua và chuyển tranh tiếp theo
+        if (wasCurrentPainter) {
+            cancelCurrentTimer();
+            showNextPainting();
+            return;
+        }
+
+        // Nếu đang trong giai đoạn chọn chủ đề, kiểm tra nếu những người còn lại đã chọn hết
+        if (topicOptions.size() > 0 && selectedTopics.size() == playerOrder.size()) {
+            cancelCurrentTimer();
+            startDrawingPhase();
+            return;
+        }
+
+        // Nếu đang trong giai đoạn vẽ, kiểm tra nếu những người còn lại đã nộp hết
+        if (submittedPlayers.size() == playerOrder.size()) {
+            cancelCurrentTimer();
+            startGuessingPhase();
+            return;
+        }
+
+        // Nếu đang trong giai đoạn đoán tranh, kiểm tra nếu những người còn lại đã đoán đúng hết
+        int totalGuessers = playerOrder.size() - 1;
+        if (totalGuessers > 0 && correctGuessers.size() >= totalGuessers) {
+            cancelCurrentTimer();
+            finishCurrentRound();
+        }
     }
 
     // ========================================================================
@@ -858,6 +1035,7 @@ public class GameSession {
         correctGuessers.clear();
         matchResults.clear();
         currentPaintingIndex = 0;
+        currentRound = 1;
     }
 
     /**

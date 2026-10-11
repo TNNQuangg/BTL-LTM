@@ -22,6 +22,7 @@ public class MainApplication extends Application {
     private String currentUsername = "";
     private String currentDisplayName = "";
     private String lastEnteredUsername = "";
+    private Envelope lastRoomUpdate;
 
     @Override
     public void start(Stage primaryStage) {
@@ -156,8 +157,29 @@ public class MainApplication extends Application {
             Alert alert = new Alert(Alert.AlertType.INFORMATION, envelope.getContent() != null ? envelope.getContent() : "Phòng đã bị giải tán.");
             alert.show();
             showLobbyScreen();
-        } else if (roomScreen != null && primaryStage.getScene() == roomScreen.getScene()) {
-            roomScreen.handleMessage(envelope);
+        }
+
+        // Cập nhật sảnh chờ cho các tin nhắn ROOM_LIST / PLAYER_LIST ngay cả khi đang ở màn hình khác
+        if (envelope.getType() == MessageType.ROOM_LIST
+                || envelope.getType() == MessageType.PLAYER_LIST
+                || envelope.getType() == MessageType.ONLINE_LIST) {
+            if (lobbyScreen != null) {
+                lobbyScreen.handleMessage(envelope);
+            }
+        }
+
+        // Luôn cập nhật thông tin phòng cho roomScreen khi nhận tin nhắn phòng
+        if (envelope.getType() == MessageType.ROOM_UPDATE || envelope.getType() == MessageType.ROOM_UPDATE_SETTINGS) {
+            lastRoomUpdate = envelope;
+            if (roomScreen != null) {
+                roomScreen.handleMessage(envelope);
+            }
+        }
+
+        if (roomScreen != null && primaryStage.getScene() == roomScreen.getScene()) {
+            if (envelope.getType() != MessageType.ROOM_UPDATE && envelope.getType() != MessageType.ROOM_UPDATE_SETTINGS) {
+                roomScreen.handleMessage(envelope);
+            }
         } else if (gameScreen != null && primaryStage.getScene() == gameScreen.getScene()) {
             gameScreen.handleMessage(envelope);
         } else if (lobbyScreen != null && primaryStage.getScene() == lobbyScreen.getScene()) {
@@ -170,11 +192,24 @@ public class MainApplication extends Application {
             lobbyScreen = new LobbyScreen(this);
         }
         primaryStage.setScene(lobbyScreen.createScene());
+
+        // Yêu cầu máy chủ gửi lại danh sách phòng và danh sách người chơi mới nhất
+        if (webSocketClient != null && webSocketClient.isConnected()) {
+            webSocketClient.send(new Envelope(MessageType.ROOM_LIST));
+            webSocketClient.send(new Envelope(MessageType.PLAYER_LIST));
+        }
     }
 
     public void showRoomScreen(String roomId, String roomName) {
         roomScreen = new com.nhom8.client.ui.RoomScreen(this, roomId, roomName);
         primaryStage.setScene(roomScreen.createScene());
+        if (lastRoomUpdate != null && roomId.equals(lastRoomUpdate.getString("roomId"))) {
+            roomScreen.handleMessage(lastRoomUpdate);
+        }
+    }
+
+    public com.nhom8.client.ui.RoomScreen getRoomScreen() {
+        return roomScreen;
     }
 
     public void showGameScreen(String roomId) {

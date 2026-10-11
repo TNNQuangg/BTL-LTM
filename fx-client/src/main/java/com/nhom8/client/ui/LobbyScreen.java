@@ -18,9 +18,10 @@ import java.util.Optional;
 public class LobbyScreen {
     private final MainApplication app;
     private final ObservableList<RoomEntry> roomList;
-    private final ObservableList<String> playerList;
+    private final ObservableList<PlayerEntry> playerList;
 
     private ListView<RoomEntry> roomListView;
+    private ListView<PlayerEntry> playerListView;
     private Label welcomeLabel;
     private Label roomCountLabel;
     private Label playerCountLabel;
@@ -41,6 +42,35 @@ public class LobbyScreen {
             String hostName = (hostDisplayName != null && !hostDisplayName.isEmpty()) ? hostDisplayName : host;
             return String.format("🎨 %s  [#%s]\n     👑 Chủ phòng: %s   |   👥 %d/%d người   |   %s",
                     name, id, hostName, playerCount, maxPlayers, stateStr);
+        }
+    }
+
+    public static class PlayerEntry {
+        public String username;
+        public String displayName;
+        public String status;
+        public int rankingScore;
+        public String roomId;
+        public String roomName;
+        public boolean canJoin;
+
+        @Override
+        public String toString() {
+            String icon;
+            String extra = "";
+            if ("Đang trong phòng chờ".equals(status)) {
+                icon = "🟡";
+                if (roomId != null && !roomId.isEmpty()) {
+                    extra = " [Phòng #" + roomId + (canJoin ? " - Còn chỗ" : " - Đầy") + "]";
+                }
+            } else if ("Đang chơi".equals(status)) {
+                icon = "🔴";
+            } else {
+                icon = "🟢";
+            }
+            return String.format("👤 %s (@%s)\n    %s %s%s • %d điểm",
+                    displayName != null && !displayName.isEmpty() ? displayName : username,
+                    username, icon, status, extra, rankingScore);
         }
     }
 
@@ -167,9 +197,33 @@ public class LobbyScreen {
 
         playersHeader.getChildren().addAll(playersTitle, playerCountLabel);
 
-        ListView<String> playerListView = new ListView<>(playerList);
+        playerListView = new ListView<>(playerList);
         playerListView.setPrefHeight(430);
         playerListView.setStyle("-fx-background-radius: 6; -fx-font-size: 13px;");
+        playerListView.setCellFactory(lv -> new ListCell<>() {
+            @Override
+            protected void updateItem(PlayerEntry item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    setText(null);
+                    setGraphic(null);
+                    setContextMenu(null);
+                } else {
+                    setText(item.toString());
+                    // Nếu người chơi đang trong phòng chờ và phòng còn chỗ trống -> Hiện menu chuột phải để vào phòng
+                    if ("Đang trong phòng chờ".equals(item.status) && item.canJoin && item.roomId != null && !item.roomId.isEmpty()) {
+                        ContextMenu contextMenu = new ContextMenu();
+                        MenuItem joinItem = new MenuItem("🚪 Vào phòng #" + item.roomId + " (" + (item.displayName != null ? item.displayName : item.username) + ")");
+                        joinItem.setStyle("-fx-font-weight: bold; -fx-cursor: hand;");
+                        joinItem.setOnAction(e -> joinRoom(item.roomId));
+                        contextMenu.getItems().add(joinItem);
+                        setContextMenu(contextMenu);
+                    } else {
+                        setContextMenu(null);
+                    }
+                }
+            }
+        });
 
         playersCard.getChildren().addAll(playersHeader, playerListView);
 
@@ -258,11 +312,15 @@ public class LobbyScreen {
                 }
                 if (listNode != null) {
                     listNode.forEach(u -> {
-                        String username = u.has("username") ? u.get("username").asText() : "";
-                        String displayName = u.has("displayName") ? u.get("displayName").asText() : username;
-                        String status = u.has("status") ? u.get("status").asText() : "Online";
-                        int score = u.has("rankingScore") ? u.get("rankingScore").asInt() : 0;
-                        playerList.add(String.format("👤 %s (@%s)\n    %s • %d điểm", displayName, username, status, score));
+                        PlayerEntry p = new PlayerEntry();
+                        p.username = u.has("username") ? u.get("username").asText() : "";
+                        p.displayName = u.has("displayName") ? u.get("displayName").asText() : p.username;
+                        p.status = u.has("status") ? u.get("status").asText() : "Đang rảnh";
+                        p.rankingScore = u.has("rankingScore") ? u.get("rankingScore").asInt() : 0;
+                        p.roomId = u.has("roomId") ? u.get("roomId").asText() : null;
+                        p.roomName = u.has("roomName") ? u.get("roomName").asText() : null;
+                        p.canJoin = u.has("canJoin") && u.get("canJoin").asBoolean();
+                        playerList.add(p);
                     });
                 }
                 if (playerCountLabel != null) {
@@ -274,6 +332,9 @@ public class LobbyScreen {
                     String roomName = env.getString("roomName");
                     if (roomName == null || roomName.isEmpty()) roomName = "Phòng " + roomId;
                     app.showRoomScreen(roomId, roomName);
+                    if (app.getRoomScreen() != null) {
+                        app.getRoomScreen().handleMessage(env);
+                    }
                 } else {
                     Alert alert = new Alert(Alert.AlertType.ERROR, env.getContent() != null ? env.getContent() : "Không thể thực hiện thao tác phòng.");
                     alert.show();

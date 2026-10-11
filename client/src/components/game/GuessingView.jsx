@@ -13,47 +13,65 @@ export default function GuessingView() {
   const { user } = useAuth();
   const [guessInput, setGuessInput] = useState('');
   
-  const drawnDataCount = useRef(0);
-
-  useEffect(() => {
+  const renderPainting = () => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
-    if (canvas && container) {
+    if (!canvas || !container) return;
+
+    if (container.clientWidth > 0 && container.clientHeight > 0) {
       canvas.width = container.clientWidth;
       canvas.height = container.clientHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
     }
-    drawnDataCount.current = 0;
-  }, []);
+    const ctx = canvas.getContext('2d');
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  useEffect(() => {
-    if (currentPainting && currentPainting.drawData && canvasRef.current) {
-      const ctx = canvasRef.current.getContext('2d');
-      const newData = currentPainting.drawData.slice(drawnDataCount.current);
-      
-      newData.forEach(data => {
-        if (data.clear) {
+    if (currentPainting && currentPainting.drawData) {
+      currentPainting.drawData.forEach(data => {
+        if (data.clear || data.tool === 'CLEAR') {
           ctx.fillStyle = '#FFFFFF';
-          ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          return;
+        }
+        if (data.undo || data.tool === 'UNDO') {
           return;
         }
         if (!data.xPoints || data.xPoints.length === 0) return;
+
         ctx.beginPath();
         ctx.moveTo(data.xPoints[0], data.yPoints[0]);
         for (let i = 1; i < data.xPoints.length; i++) {
           ctx.lineTo(data.xPoints[i], data.yPoints[i]);
         }
-        const colorHex = '#' + data.colorRGB.toString(16).padStart(6, '0');
-        ctx.strokeStyle = data.isEraser ? '#FFFFFF' : colorHex;
-        ctx.lineWidth = data.strokeWidth;
+
+        let strokeColor = '#000000';
+        const isEraser = Boolean(data.isEraser) || data.tool === 'ERASER';
+        if (isEraser) {
+          strokeColor = '#FFFFFF';
+        } else if (data.color) {
+          strokeColor = data.color.startsWith('#') ? data.color : '#' + data.color;
+        } else if (data.colorRGB !== undefined && data.colorRGB !== null) {
+          if (typeof data.colorRGB === 'number') {
+            strokeColor = '#' + (data.colorRGB & 0xFFFFFF).toString(16).padStart(6, '0');
+          } else {
+            strokeColor = String(data.colorRGB).startsWith('#') ? String(data.colorRGB) : '#' + String(data.colorRGB);
+          }
+        }
+
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = Number(data.strokeWidth || data.width || 3);
         ctx.stroke();
       });
-      drawnDataCount.current = currentPainting.drawData.length;
     }
+  };
+
+  useEffect(() => {
+    renderPainting();
+    const handleResize = () => renderPainting();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, [currentPainting]);
 
   const chatEndRef = useRef(null);

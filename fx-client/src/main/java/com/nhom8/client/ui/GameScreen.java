@@ -7,6 +7,7 @@ import com.nhom8.client.MainApplication;
 import com.nhom8.common.dto.StrokeDTO;
 import com.nhom8.common.message.Envelope;
 import com.nhom8.common.message.MessageType;
+import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -20,6 +21,7 @@ import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.StrokeLineCap;
 import javafx.scene.shape.StrokeLineJoin;
+import javafx.util.Duration;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -40,6 +42,8 @@ public class GameScreen {
     private boolean hasSubmittedDrawing = false;
     private String currentPainter = "";
     private String mySelectedTopic = "";
+    private int currentRound = 1;
+    private int maxRounds = 4;
 
     // Bộ nhớ vẽ tranh của bản thân
     private final List<StrokeDTO> myStrokes = new ArrayList<>();
@@ -66,6 +70,7 @@ public class GameScreen {
     private VBox roundResultBox;
     private Label roundResultTitle;
     private Label roundResultDetails;
+    private PauseTransition roundResultTimer;
 
     private VBox gameOverBox;
     private VBox gameOverScoresBox;
@@ -106,7 +111,7 @@ public class GameScreen {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        phaseLabel = new Label("Giai đoạn: Chuẩn bị");
+        phaseLabel = new Label("Vòng 1/" + maxRounds + " • Chuẩn bị");
         phaseLabel.setStyle("-fx-font-size: 14px; -fx-font-weight: bold; -fx-text-fill: white; -fx-background-color: rgba(0,0,0,0.2); -fx-padding: 4 10; -fx-background-radius: 10;");
 
         timerLabel = new Label("⏱ --s");
@@ -243,26 +248,39 @@ public class GameScreen {
         roundResultBox.getChildren().addAll(roundResultTitle, roundResultDetails);
 
         // --- OVERLAY 3: GAME OVER / MATCH SUMMARY ---
-        gameOverBox = new VBox(20);
+        gameOverBox = new VBox(15);
         gameOverBox.setAlignment(Pos.CENTER);
-        gameOverBox.setStyle("-fx-background-color: rgba(0, 0, 0, 0.9); -fx-padding: 40;");
+        gameOverBox.setStyle("-fx-background-color: rgba(15, 23, 42, 0.95); -fx-padding: 30;");
         gameOverBox.setVisible(false);
 
-        Label gameOverTitle = new Label("🏆 TỔNG KẾT TRẬN ĐẤU 🏆");
-        gameOverTitle.setStyle("-fx-font-size: 30px; -fx-text-fill: #F5B800; -fx-font-weight: bold;");
+        Label gameOverTitle = new Label("🏆 BẢNG XẾP HẠNG TỔNG KẾT 🏆");
+        gameOverTitle.setStyle("-fx-font-size: 28px; -fx-text-fill: #F5B800; -fx-font-weight: bold;");
 
-        gameOverScoresBox = new VBox(10);
+        Label gameOverSubtitle = new Label("Điểm số tổng kết sau các vòng đấu");
+        gameOverSubtitle.setStyle("-fx-font-size: 14px; -fx-text-fill: #CBD5E1;");
+
+        gameOverScoresBox = new VBox(8);
         gameOverScoresBox.setAlignment(Pos.CENTER);
+        gameOverScoresBox.setPadding(new Insets(10));
 
-        Button returnLobbyBtn = new Button("Quay lại sảnh chờ");
-        returnLobbyBtn.setStyle("-fx-background-color: #52c41a; -fx-text-fill: white; -fx-font-size: 16px; -fx-font-weight: bold; -fx-padding: 10 25; -fx-background-radius: 8; -fx-cursor: hand;");
-        returnLobbyBtn.setOnAction(e -> {
+        ScrollPane scoreScroll = new ScrollPane(gameOverScoresBox);
+        scoreScroll.setFitToWidth(true);
+        scoreScroll.setPrefWidth(620);
+        scoreScroll.setMaxWidth(620);
+        scoreScroll.setPrefHeight(320);
+        scoreScroll.setMaxHeight(320);
+        scoreScroll.setStyle("-fx-background: transparent; -fx-background-color: transparent;");
+
+        Button okBtn = new Button("OK");
+        okBtn.setStyle("-fx-background-color: #52c41a; -fx-text-fill: white; -fx-font-size: 18px; -fx-font-weight: bold; -fx-padding: 10 60; -fx-background-radius: 25; -fx-cursor: hand; -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.3), 6, 0, 0, 2);");
+        okBtn.setOnAction(e -> {
+            app.getWsClient().send(new Envelope(MessageType.ROOM_LEAVE));
             app.showLobbyScreen();
         });
 
-        gameOverBox.getChildren().addAll(gameOverTitle, gameOverScoresBox, returnLobbyBtn);
+        gameOverBox.getChildren().addAll(gameOverTitle, gameOverSubtitle, scoreScroll, okBtn);
 
-        StackPane mainStack = new StackPane(root, topicSelectionBox, roundResultBox, gameOverBox);
+        StackPane mainStack = new StackPane(root, roundResultBox, topicSelectionBox, gameOverBox);
         scene = new Scene(mainStack, 1150, 650);
         return scene;
     }
@@ -307,7 +325,6 @@ public class GameScreen {
             if (!isDrawingPhase || hasSubmittedDrawing) return;
             gc.lineTo(e.getX(), e.getY());
             gc.stroke();
-            gc.closePath();
             currentXPoints.add(e.getX());
             currentYPoints.add(e.getY());
             sendStrokeChunk();
@@ -457,9 +474,18 @@ public class GameScreen {
     }
 
     private void onTopicOptions(Envelope env) {
+        if (env.getInt("currentRound", 0) > 0) this.currentRound = env.getInt("currentRound", 1);
+        if (env.getInt("maxRounds", 0) > 0) this.maxRounds = env.getInt("maxRounds", 4);
+
+        if (roundResultTimer != null) {
+            roundResultTimer.stop();
+        }
+        roundResultBox.setVisible(false);
+        gameOverBox.setVisible(false);
+
         topicButtonBox.getChildren().clear();
         topicSelectionBox.setVisible(true);
-        phaseLabel.setText("Giai đoạn: Chọn chủ đề");
+        phaseLabel.setText("Vòng " + currentRound + "/" + maxRounds + " • Chọn chủ đề");
 
         int timeLimit = env.getInt("timeLimit", 10);
         topicTimerLabel.setText("Thời gian còn lại: " + timeLimit + "s");
@@ -483,17 +509,29 @@ public class GameScreen {
     }
 
     private void onTopicConfirmed(Envelope env) {
+        if (roundResultTimer != null) {
+            roundResultTimer.stop();
+        }
+        roundResultBox.setVisible(false);
         topicSelectionBox.setVisible(false);
         mySelectedTopic = env.getString("topic");
         topInfoLabel.setText("Chủ đề vẽ của bạn: " + mySelectedTopic);
     }
 
     private void onDrawStart(Envelope env) {
+        if (env.getInt("currentRound", 0) > 0) this.currentRound = env.getInt("currentRound", 1);
+        if (env.getInt("maxRounds", 0) > 0) this.maxRounds = env.getInt("maxRounds", 4);
+
+        if (roundResultTimer != null) {
+            roundResultTimer.stop();
+        }
         roundResultBox.setVisible(false);
         isDrawingPhase = true;
         isGuessingPhase = false;
         hasSubmittedDrawing = false;
         myStrokes.clear();
+        currentXPoints.clear();
+        currentYPoints.clear();
 
         gc.setFill(Color.WHITE);
         gc.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
@@ -503,22 +541,39 @@ public class GameScreen {
         submitDrawingBtn.setDisable(false);
         submitDrawingBtn.setText("📤 Nộp tranh");
 
-        phaseLabel.setText("Giai đoạn: Vẽ tranh");
+        phaseLabel.setText("Vòng " + currentRound + "/" + maxRounds + " • Vẽ tranh");
         topInfoLabel.setText("Vẽ chủ đề của bạn: " + (mySelectedTopic != null && !mySelectedTopic.isEmpty() ? mySelectedTopic : "Hãy vẽ thật đẹp!"));
     }
 
     private void onGuessStart(Envelope env) {
+        if (env.getInt("currentRound", 0) > 0) this.currentRound = env.getInt("currentRound", 1);
+        if (env.getInt("maxRounds", 0) > 0) this.maxRounds = env.getInt("maxRounds", 4);
+
+        if (roundResultTimer != null) {
+            roundResultTimer.stop();
+        }
         roundResultBox.setVisible(false);
+
+        // Tự động nộp tranh nếu chưa nộp khi chuyển sang giai đoạn đoán
+        if (isDrawingPhase && !hasSubmittedDrawing) {
+            // Flush nét vẽ dở dang còn lại
+            if (!currentXPoints.isEmpty()) {
+                sendStrokeChunk();
+            }
+            submitMyDrawing();
+        }
+
         isDrawingPhase = false;
         isGuessingPhase = true;
         toolbar.setVisible(false);
         guessFeedbackLabel.setText("");
 
         currentPainter = env.getString("painterUsername");
+        if (currentPainter == null) currentPainter = "";
         int index = env.getInt("paintingIndex", 1);
         int total = env.getInt("totalPaintings", 1);
 
-        phaseLabel.setText("Giai đoạn: Đoán tranh (" + index + "/" + total + ")");
+        phaseLabel.setText("Vòng " + currentRound + "/" + maxRounds + " • Đoán tranh (" + index + "/" + total + ")");
 
         if (currentPainter.equals(app.getCurrentUsername())) {
             topInfoLabel.setText("🖼 Tranh của BẠN đang được chiếu! (Không được đoán)");
@@ -534,6 +589,9 @@ public class GameScreen {
     }
 
     private void onPaintingDisplay(Envelope env) {
+        if (env.getInt("currentRound", 0) > 0) this.currentRound = env.getInt("currentRound", 1);
+        if (env.getInt("maxRounds", 0) > 0) this.maxRounds = env.getInt("maxRounds", 4);
+
         gc.setFill(Color.WHITE);
         gc.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
 
@@ -544,12 +602,19 @@ public class GameScreen {
 
         if (env.getData() != null && env.getData().has("drawData")) {
             JsonNode drawDataNode = env.getData().get("drawData");
-            for (JsonNode strokeNode : drawDataNode) {
+            if (drawDataNode.isTextual()) {
                 try {
-                    StrokeDTO stroke = mapper.treeToValue(strokeNode, StrokeDTO.class);
-                    drawStrokeFromNetwork(stroke);
-                } catch (Exception ex) {
-                    ex.printStackTrace();
+                    drawDataNode = mapper.readTree(drawDataNode.asText());
+                } catch (Exception ignored) {}
+            }
+            if (drawDataNode != null && drawDataNode.isArray()) {
+                for (JsonNode strokeNode : drawDataNode) {
+                    try {
+                        StrokeDTO stroke = mapper.treeToValue(strokeNode, StrokeDTO.class);
+                        drawStrokeFromNetwork(stroke);
+                    } catch (Exception ex) {
+                        ex.printStackTrace();
+                    }
                 }
             }
         }
@@ -583,6 +648,13 @@ public class GameScreen {
     }
 
     private void onRoundResult(Envelope env) {
+        if (env.getInt("currentRound", 0) > 0) this.currentRound = env.getInt("currentRound", 1);
+        if (env.getInt("maxRounds", 0) > 0) this.maxRounds = env.getInt("maxRounds", 4);
+        phaseLabel.setText("Vòng " + currentRound + "/" + maxRounds + " • Kết quả lượt");
+
+        boolean isEndOfRound = env.getBoolean("isEndOfRound", false);
+        boolean isLastRound = env.getBoolean("isLastRound", false);
+
         String topic = env.getString("topic");
         String painter = env.getString("painterUsername");
         int painterPoints = env.getInt("painterPoints", 0);
@@ -623,9 +695,25 @@ public class GameScreen {
             details.append("   (Chưa có ai đoán đúng trong lượt này)\n");
         }
 
-        details.append("\n⏱ Chuẩn bị sang bức tranh tiếp theo (3s)...");
+        if (isEndOfRound) {
+            if (isLastRound) {
+                details.append("\n🏁 ĐÃ HOÀN THÀNH TẤT CẢ ").append(maxRounds).append(" VÒNG! Đang chuyển đến bảng xếp hạng...");
+            } else {
+                details.append("\n🎉 ĐÃ HOÀN THÀNH VÒNG ").append(currentRound).append("/").append(maxRounds).append("! Chuẩn bị sang Vòng tiếp theo...");
+            }
+        } else {
+            details.append("\n⏱ Chuẩn bị sang bức tranh tiếp theo (3s)...");
+        }
+
         roundResultDetails.setText(details.toString());
         roundResultBox.setVisible(true);
+
+        if (roundResultTimer != null) {
+            roundResultTimer.stop();
+        }
+        roundResultTimer = new PauseTransition(Duration.seconds(2.8));
+        roundResultTimer.setOnFinished(e -> roundResultBox.setVisible(false));
+        roundResultTimer.play();
 
         // Cập nhật bảng điểm thời gian thực bên thanh trái
         if (env.getData() != null && env.getData().has("scores")) {
@@ -644,25 +732,76 @@ public class GameScreen {
     }
 
     private void onGameOver(Envelope env) {
+        if (roundResultTimer != null) {
+            roundResultTimer.stop();
+        }
         roundResultBox.setVisible(false);
         topicSelectionBox.setVisible(false);
         gameOverBox.setVisible(true);
         gameOverScoresBox.getChildren().clear();
 
+        if (env.getInt("totalRounds", 0) > 0) {
+            this.maxRounds = env.getInt("totalRounds", this.maxRounds);
+        }
+        phaseLabel.setText("Kết thúc • Đã hoàn thành " + maxRounds + " vòng");
+
         if (env.getData() != null && env.getData().has("scoreboard")) {
             JsonNode scoreboard = env.getData().get("scoreboard");
-            scoreboard.forEach(row -> {
+            if (scoreboard.size() == 0) {
+                Label emptyLbl = new Label("Không có người chơi nào hoàn thành toàn bộ trận đấu.");
+                emptyLbl.setStyle("-fx-font-size: 15px; -fx-text-fill: #CBD5E1; -fx-padding: 20;");
+                gameOverScoresBox.getChildren().add(emptyLbl);
+                return;
+            }
+
+            for (JsonNode row : scoreboard) {
                 int rank = row.has("rank") ? row.get("rank").asInt() : 1;
                 String user = row.has("username") ? row.get("username").asText() : "";
+                String dName = row.has("displayName") ? row.get("displayName").asText() : user;
                 int totalPoints = row.has("totalPoints") ? row.get("totalPoints").asInt() : 0;
                 int pointsDrawn = row.has("pointsDrawn") ? row.get("pointsDrawn").asInt() : 0;
                 int pointsGuess = row.has("pointsGuess") ? row.get("pointsGuess").asInt() : 0;
 
-                String medal = (rank == 1) ? "🥇" : (rank == 2) ? "🥈" : (rank == 3) ? "🥉" : "  ";
-                Label rowLbl = new Label(medal + " Hạng " + rank + ":  " + user + "  —  " + totalPoints + " đ (Vẽ: " + pointsDrawn + ", Đoán: " + pointsGuess + ")");
-                rowLbl.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: white;");
-                gameOverScoresBox.getChildren().add(rowLbl);
-            });
+                HBox card = new HBox(15);
+                card.setAlignment(Pos.CENTER_LEFT);
+                card.setPadding(new Insets(10, 20, 10, 20));
+                card.setPrefWidth(580);
+
+                String bgStyle;
+                String medal;
+                if (rank == 1) {
+                    bgStyle = "-fx-background-color: #FFF9DB; -fx-border-color: #F59F00; -fx-border-width: 2;";
+                    medal = "🥇";
+                } else if (rank == 2) {
+                    bgStyle = "-fx-background-color: #F1F3F5; -fx-border-color: #ADB5BD; -fx-border-width: 2;";
+                    medal = "🥈";
+                } else if (rank == 3) {
+                    bgStyle = "-fx-background-color: #FFF4E6; -fx-border-color: #F76707; -fx-border-width: 2;";
+                    medal = "🥉";
+                } else {
+                    bgStyle = "-fx-background-color: #FFFFFF; -fx-border-color: #CED4DA; -fx-border-width: 1;";
+                    medal = "  #" + rank;
+                }
+                card.setStyle(bgStyle + " -fx-background-radius: 8; -fx-border-radius: 8;");
+
+                Label medalLbl = new Label(medal);
+                medalLbl.setStyle("-fx-font-size: 22px; -fx-font-weight: bold;");
+
+                VBox infoBox = new VBox(3);
+                Label nameLbl = new Label(dName + (dName.equals(user) ? "" : " (@" + user + ")"));
+                nameLbl.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #1E293B;");
+
+                Label detailScoreLbl = new Label("Điểm vẽ: +" + pointsDrawn + "  |  Điểm đoán: +" + pointsGuess);
+                detailScoreLbl.setStyle("-fx-font-size: 13px; -fx-text-fill: #64748B;");
+                infoBox.getChildren().addAll(nameLbl, detailScoreLbl);
+                HBox.setHgrow(infoBox, Priority.ALWAYS);
+
+                Label totalScoreLbl = new Label(totalPoints + " đ");
+                totalScoreLbl.setStyle("-fx-font-size: 22px; -fx-font-weight: bold; -fx-text-fill: #DC2626;");
+
+                card.getChildren().addAll(medalLbl, infoBox, totalScoreLbl);
+                gameOverScoresBox.getChildren().add(card);
+            }
         }
     }
 
@@ -683,17 +822,28 @@ public class GameScreen {
             gc.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
             return;
         }
+        if (stroke.isUndo()) {
+            return; // Undo không thể tái hiện từ dữ liệu tĩnh (đã xử lý trên Server)
+        }
 
         List<Double> xs = stroke.getxPoints();
         List<Double> ys = stroke.getyPoints();
         if (xs == null || xs.isEmpty() || ys == null || ys.isEmpty()) return;
 
+        // Xử lý công cụ tẩy: dùng màu nền trắng
+        boolean isEraserStroke = StrokeDTO.TOOL_ERASER.equals(stroke.getTool());
         try {
-            gc.setStroke(Color.web(stroke.getColor() != null ? stroke.getColor() : "#000000"));
+            if (isEraserStroke) {
+                gc.setStroke(Color.WHITE);
+            } else {
+                gc.setStroke(Color.web(stroke.getColor() != null ? stroke.getColor() : "#000000"));
+            }
         } catch (Exception e) {
-            gc.setStroke(Color.BLACK);
+            gc.setStroke(isEraserStroke ? Color.WHITE : Color.BLACK);
         }
         gc.setLineWidth(stroke.getWidth() > 0 ? stroke.getWidth() : 3.0);
+        gc.setLineCap(StrokeLineCap.ROUND);
+        gc.setLineJoin(StrokeLineJoin.ROUND);
 
         if (xs.size() == 1) {
             gc.strokeLine(xs.get(0), ys.get(0), xs.get(0), ys.get(0));
@@ -704,7 +854,7 @@ public class GameScreen {
                 gc.lineTo(xs.get(i), ys.get(i));
             }
             gc.stroke();
-            gc.closePath();
+            // Không gọi gc.closePath() — tránh nối điểm cuối về điểm đầu làm biến dạng nét vẽ
         }
     }
 

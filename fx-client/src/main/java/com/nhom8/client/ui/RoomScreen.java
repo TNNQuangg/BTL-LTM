@@ -93,7 +93,7 @@ public class RoomScreen {
         ScrollPane playerScroll = new ScrollPane(playersListVBox);
         playerScroll.setFitToWidth(true);
         playerScroll.setPrefHeight(220);
-        playerScroll.setStyle("-fx-background-color: transparent; -fx-background: transparent;");
+        playerScroll.setStyle("-fx-background-color: transparent;");
 
         // Ready controls
         readyBtn = new Button("Sẵn sàng (✔)");
@@ -120,15 +120,18 @@ public class RoomScreen {
         drawTimeCombo = new ComboBox<>();
         drawTimeCombo.getItems().addAll(30, 45, 60, 90, 120);
         drawTimeCombo.setValue(60);
+        drawTimeCombo.setDisable(true);
 
         Label roundsLbl = new Label("Số vòng:");
         roundsLbl.setStyle("-fx-font-weight: bold; -fx-text-fill: #555555;");
         roundsCombo = new ComboBox<>();
-        roundsCombo.getItems().addAll(2, 3, 4, 5);
-        roundsCombo.setValue(3);
+        roundsCombo.getItems().addAll(4, 8, 12);
+        roundsCombo.setValue(4);
+        roundsCombo.setDisable(true);
 
         saveSettingsBtn = new Button("Lưu cài đặt");
         saveSettingsBtn.setStyle("-fx-background-color: #F5B800; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 6; -fx-cursor: hand;");
+        saveSettingsBtn.setDisable(true);
         saveSettingsBtn.setOnAction(e -> updateRoomSettings());
 
         settingsControls.getChildren().addAll(drawTimeLbl, drawTimeCombo, roundsLbl, roundsCombo, saveSettingsBtn);
@@ -211,7 +214,7 @@ public class RoomScreen {
 
     private void kickPlayer(String targetUsername) {
         if (!isCurrentUserHost) return;
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, "Bạn có chắc muốn kích " + targetUsername + " khỏi phòng?", ButtonType.YES, ButtonType.NO);
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, "Bạn có chắc muốn kick " + targetUsername + " khỏi phòng?", ButtonType.YES, ButtonType.NO);
         confirm.showAndWait().ifPresent(response -> {
             if (response == ButtonType.YES) {
                 Envelope env = new Envelope(MessageType.ROOM_KICK);
@@ -225,11 +228,12 @@ public class RoomScreen {
         Platform.runLater(() -> {
             switch (env.getType()) {
                 case ROOM_UPDATE:
+                case ROOM_RESPONSE:
                     onRoomUpdate(env);
                     break;
                 case ROOM_UPDATE_SETTINGS:
                     int drawTime = env.getInt("drawTime", 60);
-                    int maxRounds = env.getInt("maxRounds", 3);
+                    int maxRounds = env.getInt("maxRounds", 4);
                     drawTimeCombo.setValue(drawTime);
                     roundsCombo.setValue(maxRounds);
                     break;
@@ -268,6 +272,15 @@ public class RoomScreen {
             if (titleLabel != null) titleLabel.setText("Phòng: " + roomName);
         }
 
+        if (env.getData().has("drawTime")) {
+            int dt = env.getInt("drawTime", 60);
+            if (drawTimeCombo != null) drawTimeCombo.setValue(dt);
+        }
+        if (env.getData().has("maxRounds")) {
+            int mr = env.getInt("maxRounds", 4);
+            if (roundsCombo != null) roundsCombo.setValue(mr);
+        }
+
         int count = env.getInt("playerCount", 1);
         if (playerCountLabel != null) {
             playerCountLabel.setText(count + "/6 Người chơi");
@@ -279,17 +292,28 @@ public class RoomScreen {
 
             String myUser = app.getCurrentUsername();
 
+            // Xác định vai trò chủ phòng và trạng thái sẵn sàng của tài khoản hiện tại trước
+            boolean currentIsHost = false;
+            boolean currentIsReady = false;
+            if (myUser != null) {
+                for (JsonNode pNode : playersNode) {
+                    String uName = pNode.has("username") ? pNode.get("username").asText() : "";
+                    if (uName.equalsIgnoreCase(myUser)) {
+                        currentIsHost = pNode.has("isHost") && pNode.get("isHost").asBoolean();
+                        currentIsReady = pNode.has("isReady") && pNode.get("isReady").asBoolean();
+                        break;
+                    }
+                }
+            }
+            this.isCurrentUserHost = currentIsHost;
+            this.isCurrentUserReady = currentIsReady;
+            updateMyControls();
+
             playersNode.forEach(pNode -> {
                 String uName = pNode.has("username") ? pNode.get("username").asText() : "";
                 String dName = pNode.has("displayName") ? pNode.get("displayName").asText() : uName;
                 boolean ready = pNode.has("isReady") && pNode.get("isReady").asBoolean();
                 boolean host = pNode.has("isHost") && pNode.get("isHost").asBoolean();
-
-                if (uName.equals(myUser)) {
-                    isCurrentUserHost = host;
-                    isCurrentUserReady = ready;
-                    updateMyControls();
-                }
 
                 HBox card = new HBox(12);
                 card.setAlignment(Pos.CENTER_LEFT);
@@ -314,9 +338,9 @@ public class RoomScreen {
 
                 card.getChildren().addAll(nameLbl, statusBadge);
 
-                // Nút kích người chơi (chỉ chủ phòng thấy, và không thể tự kích mình)
-                if (isCurrentUserHost && !uName.equals(myUser)) {
-                    Button kickBtn = new Button("Kích");
+                // Nút kick người chơi (chỉ chủ phòng thấy, và không thể tự kick mình)
+                if (isCurrentUserHost && myUser != null && !uName.equalsIgnoreCase(myUser)) {
+                    Button kickBtn = new Button("Kick");
                     kickBtn.setStyle("-fx-background-color: #ff4d4f; -fx-text-fill: white; -fx-font-size: 11px; -fx-font-weight: bold; -fx-padding: 3 8; -fx-background-radius: 4; -fx-cursor: hand;");
                     kickBtn.setOnAction(e -> kickPlayer(uName));
                     card.getChildren().add(kickBtn);

@@ -13,9 +13,9 @@ export default function RoomPage() {
   const [showInvite, setShowInvite] = useState(false);
   const [friends, setFriends] = useState([]);
   
-  const me = roomPlayers.find(p => p.username === user?.username);
-  const isHost = me?.isHost;
-  const isReady = me?.isReady;
+  const me = roomPlayers.find(p => p.username?.toLowerCase() === user?.username?.toLowerCase());
+  const isHost = Boolean(me?.isHost);
+  const isReady = Boolean(me?.isReady);
 
   const invitableFriends = friends.filter(f => f.online && !f.inRoom);
 
@@ -57,11 +57,13 @@ export default function RoomPage() {
   };
 
   const handleKick = (username) => {
+    if (!isHost) return;
     wsService.send('ROOM_KICK_PLAYER', { targetUsername: username });
     playSound('tick');
   };
 
   const handleUpdateSetting = (key, value) => {
+    if (!isHost) return;
     wsService.send('ROOM_UPDATE_SETTINGS', { [key]: value });
     playSound('tick');
   };
@@ -205,9 +207,9 @@ export default function RoomPage() {
               <span style={{ color: 'var(--text-muted)' }}>Số vòng:</span>
               {isHost ? (
                 <select className="sketch-input" style={{ width: 120, padding: 5 }} value={currentRoom.maxRounds} onChange={(e) => handleUpdateSetting('maxRounds', parseInt(e.target.value))}>
-                  <option value={3}>3 Vòng</option>
-                  <option value={5}>5 Vòng</option>
-                  <option value={7}>7 Vòng</option>
+                  <option value={4}>4 Vòng</option>
+                  <option value={8}>8 Vòng</option>
+                  <option value={12}>12 Vòng</option>
                 </select>
               ) : (
                 <span style={{ fontWeight: 600, fontFamily: "var(--font-heading)" }}>{currentRoom.maxRounds} Vòng</span>

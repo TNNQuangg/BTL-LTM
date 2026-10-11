@@ -31,6 +31,9 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
+        session.setTextMessageSizeLimit(10 * 1024 * 1024); // 10MB
+        session.setBinaryMessageSizeLimit(10 * 1024 * 1024); // 10MB
+
         String address = session.getRemoteAddress() != null
                 ? session.getRemoteAddress().toString() : session.getId();
         System.out.println("[SERVER] Kết nối mới từ: " + address);
@@ -49,7 +52,13 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
             Envelope envelope = JsonUtil.fromJson(textMessage.getPayload(), Envelope.class);
             if (envelope != null && envelope.getType() != null) {
                 System.out.println("[SERVER] Nhận từ " + clientSession.getDisplayName() + ": " + envelope.getType());
-                dispatchMessage(clientSession, envelope);
+                try {
+                    dispatchMessage(clientSession, envelope);
+                } catch (Exception ex) {
+                    System.err.println("[SERVER] Lỗi xử lý thông điệp " + envelope.getType()
+                            + " từ " + clientSession.getDisplayName() + ": " + ex.getMessage());
+                    ex.printStackTrace();
+                }
             }
         } catch (Exception e) {
             System.err.println("[SERVER] JSON không hợp lệ từ "
@@ -84,6 +93,13 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
             case REGISTER:
                 gameService.handleRegister(handler, envelope);
                 break;
+            case PLAYER_LIST:
+            case ONLINE_LIST:
+                gameService.sendPlayerList(handler);
+                break;
+            case ROOM_LIST:
+                gameService.sendRoomList(handler);
+                break;
             case ROOM_CREATE:
                 gameService.handleCreateRoom(handler, envelope);
                 break;
@@ -97,9 +113,11 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
                 gameService.handleReady(handler, envelope);
                 break;
             case ROOM_SETTINGS:
+            case ROOM_UPDATE_SETTINGS:
                 gameService.handleRoomUpdateSettings(handler, envelope);
                 break;
             case ROOM_KICK:
+            case ROOM_KICK_PLAYER:
                 gameService.handleRoomKickPlayer(handler, envelope);
                 break;
             case ROOM_CHAT:
@@ -109,6 +127,7 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
                 gameService.handleTopicSelect(handler, envelope);
                 break;
             case STROKE_BATCH:
+            case DRAW_DATA:
                 gameService.handleDrawData(handler, envelope);
                 break;
             case DRAW_SUBMIT:
