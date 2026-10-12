@@ -151,6 +151,13 @@ public class GameService {
             Envelope response = Envelope.success(MessageType.ROOM_RESPONSE, "Tạo phòng thành công!");
             response.put("roomId", room.getRoomId());
             response.put("roomName", room.getRoomName());
+            response.put("hostUsername", room.getHostUsername());
+            response.put("players", room.getPlayerListData());
+            response.put("playerCount", room.getPlayerCount());
+            response.put("status", room.getStatus().name());
+            response.put("maxRounds", room.getMaxRounds());
+            response.put("drawTime", room.getDrawTime());
+            response.put("language", room.getLanguage());
             handler.sendMessage(response);
 
             broadcastRoomUpdate(room);
@@ -189,6 +196,13 @@ public class GameService {
         Envelope response = Envelope.success(MessageType.ROOM_RESPONSE, "Tham gia phòng thành công!");
         response.put("roomId", room.getRoomId());
         response.put("roomName", room.getRoomName());
+        response.put("hostUsername", room.getHostUsername());
+        response.put("players", room.getPlayerListData());
+        response.put("playerCount", room.getPlayerCount());
+        response.put("status", room.getStatus().name());
+        response.put("maxRounds", room.getMaxRounds());
+        response.put("drawTime", room.getDrawTime());
+        response.put("language", room.getLanguage());
         handler.sendMessage(response);
 
         broadcastRoomUpdate(room);
@@ -243,16 +257,16 @@ public class GameService {
         String roomId = handler.getCurrentRoomId();
         if (roomId == null) return;
         Room room = roomManager.getRoom(roomId);
-        if (room == null || !room.getHostUsername().equals(handler.getUsername())) return;
+        if (room == null || !room.getHostUsername().equalsIgnoreCase(handler.getUsername())) return;
 
         if (request.getData() != null && request.getData().has("maxRounds")) {
-            room.setMaxRounds(request.get("maxRounds"));
+            room.setMaxRounds(request.getInt("maxRounds", room.getMaxRounds()));
         }
         if (request.getData() != null && request.getData().has("drawTime")) {
-            room.setDrawTime(request.get("drawTime"));
+            room.setDrawTime(request.getInt("drawTime", room.getDrawTime()));
         }
         if (request.getData() != null && request.getData().has("language")) {
-            room.setLanguage(request.get("language"));
+            room.setLanguage(request.getString("language"));
         }
         
         Envelope updateSettings = new Envelope(MessageType.ROOM_UPDATE_SETTINGS);
@@ -266,7 +280,7 @@ public class GameService {
         String roomId = handler.getCurrentRoomId();
         if (roomId == null) return;
         Room room = roomManager.getRoom(roomId);
-        if (room == null || !room.getHostUsername().equals(handler.getUsername())) return;
+        if (room == null || !room.getHostUsername().equalsIgnoreCase(handler.getUsername())) return;
 
         String targetUsername = request.get("targetUsername");
         ClientSession targetSession = onlineClients.get(targetUsername);
@@ -637,12 +651,31 @@ public class GameService {
     // BROADCAST
     // ========================================================================
 
-    public void broadcastPlayerList() {
+    public List<Map<String, Object>> buildPlayerListData() {
         List<Map<String, Object>> playerList = new ArrayList<>();
         for (Map.Entry<String, ClientSession> entry : onlineClients.entrySet()) {
+            ClientSession session = entry.getValue();
             Map<String, Object> playerInfo = new HashMap<>();
             playerInfo.put("username", entry.getKey());
-            playerInfo.put("status", entry.getValue().getCurrentRoomId() != null ? "Đang bận" : "Đang rỗi");
+            playerInfo.put("displayName", session.getDisplayName() != null ? session.getDisplayName() : entry.getKey());
+
+            String roomId = session.getCurrentRoomId();
+            String status = "Đang rảnh";
+            if (roomId != null) {
+                Room room = roomManager.getRoom(roomId);
+                if (room != null) {
+                    playerInfo.put("roomId", room.getRoomId());
+                    playerInfo.put("roomName", room.getRoomName());
+                    boolean canJoin = (room.getStatus() == Room.RoomStatus.WAITING && room.getPlayerCount() < Room.MAX_PLAYERS);
+                    playerInfo.put("canJoin", canJoin);
+                    if (room.getStatus() == Room.RoomStatus.WAITING) {
+                        status = "Đang trong phòng chờ";
+                    } else if (room.getStatus() == Room.RoomStatus.PLAYING) {
+                        status = "Đang chơi";
+                    }
+                }
+            }
+            playerInfo.put("status", status);
 
             User user = userRepository.findByUsername(entry.getKey());
             playerInfo.put("rankingScore", user != null ? user.getRankingScore() : 0);
@@ -650,9 +683,18 @@ public class GameService {
 
             playerList.add(playerInfo);
         }
+        return playerList;
+    }
 
+    public void sendPlayerList(ClientSession handler) {
         Envelope msg = new Envelope(MessageType.PLAYER_LIST);
-        msg.put("players", playerList);
+        msg.put("players", buildPlayerListData());
+        handler.sendMessage(msg);
+    }
+
+    public void broadcastPlayerList() {
+        Envelope msg = new Envelope(MessageType.PLAYER_LIST);
+        msg.put("players", buildPlayerListData());
 
         for (ClientSession handler : onlineClients.values()) {
             handler.sendMessage(msg);
@@ -678,9 +720,13 @@ public class GameService {
         Envelope msg = new Envelope(MessageType.ROOM_UPDATE);
         msg.put("roomId", room.getRoomId());
         msg.put("roomName", room.getRoomName());
+        msg.put("hostUsername", room.getHostUsername());
         msg.put("players", room.getPlayerListData());
         msg.put("playerCount", room.getPlayerCount());
         msg.put("status", room.getStatus().name());
+        msg.put("maxRounds", room.getMaxRounds());
+        msg.put("drawTime", room.getDrawTime());
+        msg.put("language", room.getLanguage());
 
         room.broadcast(msg);
     }

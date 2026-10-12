@@ -39,6 +39,7 @@ public enum MessageType {
     ROOM_CHAT,
     ROOM_CHAT_RECEIVE,
     ROOM_KICK,
+    ROOM_KICK_PLAYER,
     ROOM_SETTINGS,
     ROOM_UPDATE_SETTINGS,
 
@@ -56,6 +57,7 @@ public enum MessageType {
     DRAW_PHASE_START,
     DRAW_START,
     STROKE_BATCH,
+    DRAW_DATA,        // Tương thích với React Client (cùng xử lý như STROKE_BATCH)
     DRAW_SUBMIT,
     GUESS_PHASE_START,
     GUESS_START,

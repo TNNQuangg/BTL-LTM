@@ -6,10 +6,15 @@ export default function GameSummary() {
 
   if (!gameResult) return null;
 
-  const results = [...(gameResult.results || [])].sort((a, b) => (b.pointsDrawn + b.pointsGuess) - (a.pointsDrawn + a.pointsGuess));
+  const results = [...(gameResult.scoreboard || gameResult.results || [])].map(r => ({
+    ...r,
+    totalPoints: r.totalPoints !== undefined ? r.totalPoints : ((r.pointsDrawn || 0) + (r.pointsGuess || 0))
+  })).sort((a, b) => b.totalPoints - a.totalPoints);
   
-  const getDisplayName = (username) => {
-    return roomPlayers.find(p => p.username === username)?.displayName || username;
+  const getDisplayName = (r) => {
+    if (!r) return '';
+    if (r.displayName) return r.displayName;
+    return roomPlayers.find(p => p.username === r.username)?.displayName || r.username || 'Người chơi';
   };
 
   const top1 = results[0];
@@ -28,25 +33,25 @@ export default function GameSummary() {
       <div className="podium-container">
         {top2 && (
           <motion.div className="podium-bar podium-2" initial={{ height: 0 }} animate={{ height: 180 }} transition={{ duration: 1, delay: 0.5 }}>
-            <div style={{ position: 'absolute', top: -50, fontFamily: "'Bangers', cursive", fontSize: '1.2rem', color: 'var(--ink)' }}>{getDisplayName(top2.username)}</div>
+            <div style={{ position: 'absolute', top: -50, fontFamily: "'Bangers', cursive", fontSize: '1.2rem', color: 'var(--ink)' }}>{getDisplayName(top2)}</div>
             <div style={{ fontSize: '2rem', fontFamily: "'Bangers', cursive", color: 'var(--ink)' }}>🥈 #2</div>
-            <div style={{ fontFamily: "'Caveat', cursive", fontSize: '1.1rem', color: 'var(--ink)' }}>{top2.pointsDrawn + top2.pointsGuess} PTS</div>
+            <div style={{ fontFamily: "'Caveat', cursive", fontSize: '1.1rem', color: 'var(--ink)' }}>{top2.totalPoints} PTS</div>
           </motion.div>
         )}
         
         {top1 && (
           <motion.div className="podium-bar podium-1" initial={{ height: 0 }} animate={{ height: 250 }} transition={{ duration: 1, delay: 1 }}>
-            <div style={{ position: 'absolute', top: -60, fontFamily: "'Bangers', cursive", fontSize: '1.5rem', color: 'var(--ink)' }}>{getDisplayName(top1.username)}</div>
+            <div style={{ position: 'absolute', top: -60, fontFamily: "'Bangers', cursive", fontSize: '1.5rem', color: 'var(--ink)' }}>{getDisplayName(top1)}</div>
             <div style={{ fontSize: '3rem', fontFamily: "'Bangers', cursive", color: 'var(--ink)' }}>🥇 #1</div>
-            <div style={{ fontFamily: "'Caveat', cursive", fontSize: '1.3rem', color: 'var(--ink)' }}>{top1.pointsDrawn + top1.pointsGuess} PTS</div>
+            <div style={{ fontFamily: "'Caveat', cursive", fontSize: '1.3rem', color: 'var(--ink)' }}>{top1.totalPoints} PTS</div>
           </motion.div>
         )}
 
         {top3 && (
           <motion.div className="podium-bar podium-3" initial={{ height: 0 }} animate={{ height: 140 }} transition={{ duration: 1, delay: 0.2 }}>
-            <div style={{ position: 'absolute', top: -40, fontFamily: "'Bangers', cursive", fontSize: '1rem', color: 'var(--ink)' }}>{getDisplayName(top3.username)}</div>
+            <div style={{ position: 'absolute', top: -40, fontFamily: "'Bangers', cursive", fontSize: '1rem', color: 'var(--ink)' }}>{getDisplayName(top3)}</div>
             <div style={{ fontSize: '1.8rem', fontFamily: "'Bangers', cursive", color: 'var(--ink)' }}>🥉 #3</div>
-            <div style={{ fontFamily: "'Caveat', cursive", fontSize: '1rem', color: 'var(--ink)' }}>{top3.pointsDrawn + top3.pointsGuess} PTS</div>
+            <div style={{ fontFamily: "'Caveat', cursive", fontSize: '1rem', color: 'var(--ink)' }}>{top3.totalPoints} PTS</div>
           </motion.div>
         )}
       </div>
@@ -64,13 +69,13 @@ export default function GameSummary() {
           </thead>
           <tbody>
             {results.map((r, index) => {
-              const total = r.pointsDrawn + r.pointsGuess;
+              const total = r.totalPoints;
               return (
-                <tr key={r.username} style={{ borderTop: '2px solid var(--ink)' }}>
+                <tr key={r.username || index} style={{ borderTop: '2px solid var(--ink)' }}>
                   <td style={{ padding: '16px 24px', fontFamily: "'Bangers', cursive", color: 'var(--ink)' }}>#{index + 1}</td>
-                  <td style={{ padding: '16px 24px', color: 'var(--ink)' }}>{getDisplayName(r.username)}</td>
-                  <td style={{ padding: '16px 24px', textAlign: 'center', color: 'var(--ink)' }}>{r.pointsDrawn}</td>
-                  <td style={{ padding: '16px 24px', textAlign: 'center', color: 'var(--ink)' }}>{r.pointsGuess}</td>
+                  <td style={{ padding: '16px 24px', color: 'var(--ink)' }}>{getDisplayName(r)}</td>
+                  <td style={{ padding: '16px 24px', textAlign: 'center', color: 'var(--ink)' }}>{r.pointsDrawn || 0}</td>
+                  <td style={{ padding: '16px 24px', textAlign: 'center', color: 'var(--ink)' }}>{r.pointsGuess || 0}</td>
                   <td style={{ padding: '16px 24px', textAlign: 'right', fontFamily: "'Bangers', cursive", color: 'var(--accent-green)' }}>{total}</td>
                 </tr>
               );
@@ -79,8 +84,8 @@ export default function GameSummary() {
         </table>
       </motion.div>
 
-      <motion.button initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 2.5 }} className="btn btn-primary" style={{ padding: '16px 40px', fontSize: '1.3rem', fontFamily: "'Bangers', cursive", letterSpacing: 3 }} onClick={returnToLobby}>
-        QUAY LẠI LOBBY
+      <motion.button initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 2.5 }} className="btn btn-primary" style={{ padding: '16px 60px', fontSize: '1.4rem', fontFamily: "'Bangers', cursive", letterSpacing: 3 }} onClick={returnToLobby}>
+        OK
       </motion.button>
     </div>
   );

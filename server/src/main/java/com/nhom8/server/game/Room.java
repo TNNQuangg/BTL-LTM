@@ -33,7 +33,7 @@ public class Room {
     private GameSession gameSession;
 
     // Room Settings
-    private int maxRounds = 3;
+    private int maxRounds = 4;
     private int drawTime = 60;
     private String language = "vi";
 
@@ -60,8 +60,11 @@ public class Room {
     public synchronized void removePlayer(ClientSession handler) {
         players.remove(handler.getUsername());
         readyStatus.remove(handler.getUsername());
-        if (handler.getUsername().equals(hostUsername) && !players.isEmpty()) {
+        if (handler.getUsername() != null && handler.getUsername().equalsIgnoreCase(hostUsername) && !players.isEmpty()) {
             hostUsername = players.keys().nextElement();
+        }
+        if (isPlaying() && gameSession != null) {
+            gameSession.onPlayerLeft(handler.getUsername());
         }
     }
 
@@ -98,7 +101,7 @@ public class Room {
             info.put("username", entry.getKey());
             info.put("displayName", entry.getValue().getDisplayName());
             info.put("isReady", readyStatus.getOrDefault(entry.getKey(), false));
-            info.put("isHost", entry.getKey().equals(hostUsername));
+            info.put("isHost", entry.getKey().equalsIgnoreCase(hostUsername));
             list.add(info);
         }
         return list;

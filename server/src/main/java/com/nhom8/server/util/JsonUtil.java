@@ -1,6 +1,7 @@
 package com.nhom8.server.util;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.type.CollectionType;
 
@@ -13,7 +14,8 @@ import java.util.List;
  */
 public class JsonUtil {
 
-    private static final ObjectMapper mapper = new ObjectMapper();
+    private static final ObjectMapper mapper = new ObjectMapper()
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     public static String toJson(Object obj) {
         try {
@@ -48,6 +50,9 @@ public class JsonUtil {
             String json = mapper.writeValueAsString(obj);
             return mapper.readValue(json, listType);
         } catch (Exception e) {
+            System.err.println("[JsonUtil] CẢNH BÁO: Lỗi convertList sang " + elementClass.getSimpleName()
+                    + " — dữ liệu gốc: " + (obj != null ? obj.getClass().getSimpleName() : "null")
+                    + " — " + e.getMessage());
             e.printStackTrace();
             return new ArrayList<>();
         }

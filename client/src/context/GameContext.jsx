@@ -107,7 +107,7 @@ export function GameProvider({ children }) {
           setCurrentRoom({ 
             roomId: msg.data.roomId, 
             roomName: msg.data.roomName,
-            maxRounds: msg.data.maxRounds || 3,
+            maxRounds: msg.data.maxRounds || 4,
             drawTime: msg.data.drawTime || 60,
             language: msg.data.language || 'vi'
           });
