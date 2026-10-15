@@ -727,6 +727,7 @@ public class LobbyScreen {
     private void promptCreateRoom() {
         DoodleDialog.input(app.getPrimaryStage(), "Tạo phòng mới",
                 "Đặt tên cho phòng chơi của bạn:", "Phòng của " + app.getCurrentDisplayName(), name -> {
+                    if (name == null) return;
                     String trimmed = (name != null) ? name.trim() : "";
                     if (trimmed.isEmpty()) {
                         trimmed = "Phòng của " + app.getCurrentDisplayName();
