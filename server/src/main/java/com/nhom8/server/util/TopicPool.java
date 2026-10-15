@@ -11,6 +11,11 @@ import java.util.List;
 public class TopicPool {
 
     private static final List<String> ALL_TOPICS = new ArrayList<>();
+    private static volatile List<String> customTopics = List.of();
+
+    public static void setCustomTopics(List<String> topics) {
+        customTopics = List.copyOf(topics);
+    }
 
     static {
         String[] doVat = {
@@ -46,10 +51,12 @@ public class TopicPool {
 
     public static List<List<String>> getTopicOptionsForRoom(int playerCount) {
         int requiredTopics = playerCount * 3;
-        List<String> poolCopy = new ArrayList<>(ALL_TOPICS);
+        List<String> available = new ArrayList<>(ALL_TOPICS);
+        available.addAll(customTopics);
+        List<String> poolCopy = new ArrayList<>(available);
         Collections.shuffle(poolCopy);
         while (poolCopy.size() < requiredTopics) {
-            List<String> extra = new ArrayList<>(ALL_TOPICS);
+            List<String> extra = new ArrayList<>(available);
             Collections.shuffle(extra);
             poolCopy.addAll(extra);
         }

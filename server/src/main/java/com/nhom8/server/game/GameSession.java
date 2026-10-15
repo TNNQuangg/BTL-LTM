@@ -148,7 +148,8 @@ public class GameSession {
      * Bắt đầu trận đấu: cố định thứ tự người chơi, tạo bản ghi Match trong DB,
      * và khởi động giai đoạn chọn chủ đề.
      */
-    public void startGame() {
+    public synchronized void startGame() {
+        if (gameActive || room.isPlaying()) return;
         gameActive = true;
         currentRound = 1;
         room.setStatus(Room.RoomStatus.PLAYING);
@@ -889,6 +890,23 @@ public class GameSession {
         // Cập nhật lobby
         getGameService().broadcastPlayerList();
         getGameService().broadcastRoomList();
+    }
+
+    /**
+     * Hủy trận đấu (khi phòng bị giải tán giữa chừng do không đủ người).
+     * Khác với endGame(): KHÔNG lưu kết quả, KHÔNG cộng điểm.
+     */
+    public synchronized void cancelGame() {
+        if (!gameActive) return;
+        gameActive = false;
+        stopCountdown();
+        cancelCurrentTimer();
+
+        room.setStatus(Room.RoomStatus.WAITING);
+        room.resetReadyStatus();
+
+        // Dọn dẹp dữ liệu phiên chơi
+        cleanup();
     }
 
     /**

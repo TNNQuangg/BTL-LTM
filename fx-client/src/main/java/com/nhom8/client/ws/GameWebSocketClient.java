@@ -28,7 +28,7 @@ public class GameWebSocketClient implements WebSocket.Listener {
     private java.util.concurrent.CompletableFuture<WebSocket> connectFuture;
 
     public java.util.concurrent.CompletableFuture<WebSocket> connect() {
-        if (webSocket != null) {
+        if (webSocket != null && !webSocket.isOutputClosed()) {
             return java.util.concurrent.CompletableFuture.completedFuture(webSocket);
         }
         if (connectFuture != null && !connectFuture.isDone()) {
@@ -52,7 +52,7 @@ public class GameWebSocketClient implements WebSocket.Listener {
     }
 
     public void send(Envelope envelope) {
-        if (webSocket != null) {
+        if (webSocket != null && !webSocket.isOutputClosed()) {
             String json = envelope.toJson();
             webSocket.sendText(json, true);
         } else {
@@ -75,11 +75,13 @@ public class GameWebSocketClient implements WebSocket.Listener {
     public void close() {
         if (webSocket != null) {
             webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "Client đóng kết nối");
+            webSocket = null;
+            connectFuture = null;
         }
     }
 
     public boolean isConnected() {
-        return webSocket != null;
+        return webSocket != null && !webSocket.isOutputClosed();
     }
 
     // === WebSocket.Listener implementation ===
@@ -108,7 +110,7 @@ public class GameWebSocketClient implements WebSocket.Listener {
     @Override
     public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
         System.out.println("[CLIENT] WebSocket Closed: " + reason);
-        this.webSocket = null;
+        if (this.webSocket == webSocket) this.webSocket = null;
         return WebSocket.Listener.super.onClose(webSocket, statusCode, reason);
     }
 

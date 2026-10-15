@@ -142,6 +142,22 @@ public class User implements Serializable {
     }
 
     @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        User user = (User) o;
+        if (userId != null && user.userId != null) {
+            return userId.equals(user.userId);
+        }
+        return username != null && username.equalsIgnoreCase(user.username);
+    }
+
+    @Override
+    public int hashCode() {
+        return userId != null ? userId.hashCode() : (username != null ? username.toLowerCase().hashCode() : 0);
+    }
+
+    @Override
     public String toString() {
         return "User{" +
                 "userId=" + userId +

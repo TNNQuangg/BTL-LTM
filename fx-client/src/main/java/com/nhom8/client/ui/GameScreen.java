@@ -51,6 +51,7 @@ public class GameScreen {
     private final List<Double> currentYPoints = new ArrayList<>();
     private Color currentColor = Color.BLACK;
     private double currentWidth = 3.0;
+    private boolean eraserSelected = false;
 
     // UI Controls
     private Label topInfoLabel;
@@ -99,23 +100,23 @@ public class GameScreen {
         topBox.setStyle("-fx-background-color: rgba(0, 0, 0, 0.15);");
 
         Button leaveBtn = new Button("⬅ Thoát");
-        leaveBtn.setStyle("-fx-background-color: white; -fx-text-fill: #D8000C; -fx-font-weight: bold; -fx-background-radius: 6; -fx-cursor: hand;");
+        leaveBtn.getStyleClass().add("pencil-button-sm");
         leaveBtn.setOnAction(e -> {
             app.getWsClient().send(new Envelope(MessageType.ROOM_LEAVE));
             app.showLobbyScreen();
         });
 
         topInfoLabel = new Label("Phòng: " + roomId + " | Đang khởi tạo...");
-        topInfoLabel.setStyle("-fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: white;");
+        topInfoLabel.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 22px; -fx-font-weight: bold; -fx-text-fill: -fx-ink;");
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
         phaseLabel = new Label("Vòng 1/" + maxRounds + " • Chuẩn bị");
-        phaseLabel.setStyle("-fx-font-size: 14px; -fx-font-weight: bold; -fx-text-fill: white; -fx-background-color: rgba(0,0,0,0.2); -fx-padding: 4 10; -fx-background-radius: 10;");
+        phaseLabel.getStyleClass().add("name-tag");
 
         timerLabel = new Label("⏱ --s");
-        timerLabel.setStyle("-fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: white; -fx-background-color: #D8000C; -fx-padding: 4 12; -fx-background-radius: 12;");
+        timerLabel.setStyle("-fx-font-family: 'Amatic SC'; -fx-font-size: 28px; -fx-font-weight: bold; -fx-text-fill: white; -fx-background-color: -fx-ink; -fx-padding: 2 14; -fx-border-color: white; -fx-border-width: 2;");
 
         topBox.getChildren().addAll(leaveBtn, topInfoLabel, spacer, phaseLabel, timerLabel);
         root.setTop(topBox);
@@ -124,10 +125,15 @@ public class GameScreen {
         VBox centerBox = new VBox(10);
         centerBox.setAlignment(Pos.CENTER);
         centerBox.setPadding(new Insets(10));
+        VBox.setVgrow(centerBox, Priority.ALWAYS);
 
-        // Khung Canvas với viền nổi bật
+        // Khung Canvas với viền nổi bật kiểu doodle
         StackPane canvasContainer = new StackPane();
-        canvasContainer.setStyle("-fx-background-color: white; -fx-border-color: #333333; -fx-border-width: 3; -fx-border-radius: 8; -fx-background-radius: 8; -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.2), 8, 0, 0, 2);");
+        canvasContainer.setStyle("-fx-background-color: white; -fx-border-color: -fx-ink; -fx-border-width: 3; -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.2), 8, 0, 0, 2);");
+        VBox.setVgrow(canvasContainer, Priority.ALWAYS);
+        canvasContainer.setMaxWidth(Double.MAX_VALUE);
+        canvasContainer.setMaxHeight(Double.MAX_VALUE);
+
         canvas = new Canvas(640, 460);
         gc = canvas.getGraphicsContext2D();
         gc.setFill(Color.WHITE);
@@ -142,27 +148,38 @@ public class GameScreen {
         toolbar = new HBox(12);
         toolbar.setAlignment(Pos.CENTER);
         toolbar.setPadding(new Insets(8, 15, 8, 15));
-        toolbar.setStyle("-fx-background-color: white; -fx-background-radius: 8;");
+        toolbar.setStyle("-fx-background-color: white; -fx-border-color: -fx-ink; -fx-border-width: 2;");
 
         ColorPicker colorPicker = new ColorPicker(Color.BLACK);
         colorPicker.setStyle("-fx-cursor: hand;");
-        colorPicker.setOnAction(e -> currentColor = colorPicker.getValue());
 
         Slider widthSlider = new Slider(1, 25, 3);
         widthSlider.setPrefWidth(100);
         widthSlider.valueProperty().addListener((obs, oldVal, newVal) -> currentWidth = newVal.doubleValue());
 
+        Button eraserBtn = new Button("⌫ Tẩy");
+        eraserBtn.getStyleClass().add("pencil-button-sm");
+        eraserBtn.setOnAction(e -> {
+            eraserSelected = !eraserSelected;
+            eraserBtn.setText(eraserSelected ? "✎ Bút vẽ" : "⌫ Tẩy");
+        });
+        colorPicker.setOnAction(e -> {
+            currentColor = colorPicker.getValue();
+            eraserSelected = false;
+            eraserBtn.setText("⌫ Tẩy");
+        });
+
         Button clearBtn = new Button("🗑 Xóa bảng");
-        clearBtn.setStyle("-fx-background-color: #ff4d4f; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 6; -fx-cursor: hand;");
+        clearBtn.getStyleClass().add("pencil-button-sm");
         clearBtn.setOnAction(e -> clearCanvas());
 
         submitDrawingBtn = new Button("📤 Nộp tranh");
-        submitDrawingBtn.setStyle("-fx-background-color: #52c41a; -fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 13px; -fx-background-radius: 6; -fx-cursor: hand; -fx-padding: 6 16;");
+        submitDrawingBtn.getStyleClass().add("pencil-button-sm");
         submitDrawingBtn.setOnAction(e -> submitMyDrawing());
 
         toolbar.getChildren().addAll(
                 new Label("Màu:"), colorPicker,
-                new Label("Cỡ bút:"), widthSlider,
+                new Label("Cỡ bút:"), widthSlider, eraserBtn,
                 clearBtn,
                 submitDrawingBtn
         );
@@ -174,14 +191,15 @@ public class GameScreen {
         // --- LEFT: PLAYERS & SCORES ---
         VBox leftBox = new VBox(10);
         leftBox.setPadding(new Insets(10));
-        leftBox.setPrefWidth(190);
+        leftBox.setMinWidth(210);
+        leftBox.setPrefWidth(220);
 
         Label pLabel = new Label("🏆 Bảng điểm:");
-        pLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: white;");
+        pLabel.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 22px; -fx-font-weight: bold; -fx-text-fill: -fx-ink;");
 
         ListView<String> pList = new ListView<>(playerList);
-        pList.setPrefHeight(480);
-        pList.setStyle("-fx-background-radius: 8;");
+        VBox.setVgrow(pList, Priority.ALWAYS);
+        pList.setMaxHeight(Double.MAX_VALUE);
 
         leftBox.getChildren().addAll(pLabel, pList);
         root.setLeft(leftBox);
@@ -189,17 +207,22 @@ public class GameScreen {
         // --- RIGHT: CHAT & GUESS INPUT ---
         VBox rightBox = new VBox(10);
         rightBox.setPadding(new Insets(10));
-        rightBox.setPrefWidth(270);
+        rightBox.setMinWidth(280);
+        rightBox.setPrefWidth(300);
 
-        Label chatTitle = new Label("💬 Trò chuyện / Đoán:");
-        chatTitle.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: white;");
+        VBox chatTitleBox = new VBox(2);
+        Label chatTitle = new Label("💬 CHAT PHÒNG & ĐOÁN TỪ");
+        chatTitle.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 20px; -fx-font-weight: bold; -fx-text-fill: -fx-ink;");
+        Label chatSubtitle = new Label("🔒 Nội bộ phòng #" + roomId);
+        chatSubtitle.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 13px; -fx-text-fill: #555555;");
+        chatTitleBox.getChildren().addAll(chatTitle, chatSubtitle);
 
         chatView = new ListView<>(chatMessages);
-        chatView.setPrefHeight(420);
-        chatView.setStyle("-fx-background-radius: 8;");
+        VBox.setVgrow(chatView, Priority.ALWAYS);
+        chatView.setMaxHeight(Double.MAX_VALUE);
 
         guessFeedbackLabel = new Label("");
-        guessFeedbackLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 12px; -fx-text-fill: white;");
+        guessFeedbackLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 15px; -fx-text-fill: -fx-ink; -fx-font-family: 'Patrick Hand';");
 
         HBox inputBox = new HBox(8);
         inputField = new TextField();
@@ -208,12 +231,12 @@ public class GameScreen {
         inputField.setOnAction(e -> handleInputSubmit());
 
         Button sendBtn = new Button("Gửi");
-        sendBtn.setStyle("-fx-background-color: white; -fx-text-fill: #F5B800; -fx-font-weight: bold; -fx-background-radius: 6; -fx-cursor: hand;");
+        sendBtn.getStyleClass().add("pencil-button-sm");
         sendBtn.setOnAction(e -> handleInputSubmit());
 
         inputBox.getChildren().addAll(inputField, sendBtn);
 
-        rightBox.getChildren().addAll(chatTitle, chatView, guessFeedbackLabel, inputBox);
+        rightBox.getChildren().addAll(chatTitleBox, chatView, guessFeedbackLabel, inputBox);
         root.setRight(rightBox);
 
         // --- OVERLAY 1: TOPIC SELECTION ---
@@ -282,6 +305,7 @@ public class GameScreen {
 
         StackPane mainStack = new StackPane(root, roundResultBox, topicSelectionBox, gameOverBox);
         scene = new Scene(mainStack, 1150, 650);
+        MainApplication.applyTheme(scene);
         return scene;
     }
 
@@ -294,8 +318,8 @@ public class GameScreen {
             if (!isDrawingPhase || hasSubmittedDrawing) return;
             currentXPoints.clear();
             currentYPoints.clear();
-            gc.setStroke(currentColor);
-            gc.setLineWidth(currentWidth);
+            gc.setStroke(eraserSelected ? Color.WHITE : currentColor);
+            gc.setLineWidth(eraserSelected ? Math.max(16, currentWidth * 2) : currentWidth);
             // Vẽ chấm nếu chỉ click chuột tại 1 điểm
             gc.strokeLine(e.getX(), e.getY(), e.getX(), e.getY());
             gc.beginPath();
@@ -335,9 +359,9 @@ public class GameScreen {
         if (currentXPoints.isEmpty()) return;
 
         StrokeDTO stroke = new StrokeDTO(
-                StrokeDTO.TOOL_BRUSH,
-                toHexString(currentColor),
-                currentWidth,
+                eraserSelected ? StrokeDTO.TOOL_ERASER : StrokeDTO.TOOL_BRUSH,
+                eraserSelected ? "#FFFFFF" : toHexString(currentColor),
+                eraserSelected ? Math.max(16, currentWidth * 2) : currentWidth,
                 new ArrayList<>(currentXPoints),
                 new ArrayList<>(currentYPoints)
         );
@@ -355,6 +379,8 @@ public class GameScreen {
         if (!isDrawingPhase || hasSubmittedDrawing) return;
         gc.setFill(Color.WHITE);
         gc.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
+
+        myStrokes.clear();
 
         StrokeDTO clearDto = new StrokeDTO();
         clearDto.setTool(StrokeDTO.TOOL_CLEAR);

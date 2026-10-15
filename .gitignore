@@ -15,11 +15,11 @@ target/
 .classpath
 .project
 
-# React / Node (if any leftovers)
-node_modules/
+# Build output
 dist/
 build/
 .env
+/server/data/
 
 # OS generated files
 .DS_Store

@@ -36,6 +36,9 @@ public class Room {
     private int maxRounds = 4;
     private int drawTime = 60;
     private String language = "vi";
+    private boolean requireApproval = false;
+    private final Set<String> invitedUsers = ConcurrentHashMap.newKeySet();
+    private final Set<String> approvedUsers = ConcurrentHashMap.newKeySet();
 
     public Room(String roomId, String roomName, ClientSession host, GameService gameService) {
         this.roomId = roomId;
@@ -51,6 +54,7 @@ public class Room {
     }
 
     public synchronized void addPlayer(ClientSession handler) {
+        if (handler == null || handler.getUsername() == null) return;
         if (players.size() < MAX_PLAYERS) {
             players.put(handler.getUsername(), handler);
             readyStatus.put(handler.getUsername(), false);
@@ -58,9 +62,10 @@ public class Room {
     }
 
     public synchronized void removePlayer(ClientSession handler) {
+        if (handler == null || handler.getUsername() == null) return;
         players.remove(handler.getUsername());
         readyStatus.remove(handler.getUsername());
-        if (handler.getUsername() != null && handler.getUsername().equalsIgnoreCase(hostUsername) && !players.isEmpty()) {
+        if (handler.getUsername().equalsIgnoreCase(hostUsername) && !players.isEmpty()) {
             hostUsername = players.keys().nextElement();
         }
         if (isPlaying() && gameSession != null) {
@@ -126,6 +131,22 @@ public class Room {
     public void setDrawTime(int drawTime) { this.drawTime = drawTime; }
     public String getLanguage() { return language; }
     public void setLanguage(String language) { this.language = language; }
+
+    public boolean isRequireApproval() { return requireApproval; }
+    public void setRequireApproval(boolean requireApproval) { this.requireApproval = requireApproval; }
+
+    public void inviteUser(String username) {
+        if (username != null) invitedUsers.add(username.toLowerCase());
+    }
+
+    public void approveUser(String username) {
+        if (username != null) approvedUsers.add(username.toLowerCase());
+    }
+
+    public boolean isUserInvitedOrApproved(String username) {
+        if (username == null) return false;
+        return invitedUsers.contains(username.toLowerCase()) || approvedUsers.contains(username.toLowerCase());
+    }
 
     public void resetReadyStatus() {
         for (String username : readyStatus.keySet()) {

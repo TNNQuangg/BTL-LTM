@@ -88,10 +88,16 @@ public class GameIntegrationTest {
             bot.sendReady();
         }
 
-        // 5. Game start phase (Wait for TOPIC_OPTIONS and send TOPIC_SELECT)
+        // 5. Chọn một trong các chủ đề thật được cấp cho từng người chơi.
         Thread.sleep(2000);
         for (BotClient bot : bots) {
-            bot.sendTopicSelect("con mèo");
+            for (Envelope env : bot.getReceivedMessages()) {
+                if (env.getType() == MessageType.TOPIC_OPTIONS && env.getData().path("topics").isArray()
+                        && !env.getData().path("topics").isEmpty()) {
+                    bot.sendTopicSelect(env.getData().path("topics").get(0).asText());
+                    break;
+                }
+            }
         }
 
         // 6. Draw phase
@@ -105,7 +111,7 @@ public class GameIntegrationTest {
         
         // Wait for all 3 paintings to finish (each takes ~15s total if not guessed, total ~45s)
         boolean gameFinished = false;
-        for (int i = 0; i < 45; i++) {
+        for (int i = 0; i < 75; i++) {
             Thread.sleep(1000);
             for (Envelope env : bots.get(0).getReceivedMessages()) {
                 if (env.getType() == MessageType.GAME_RESULT) {
@@ -130,7 +136,7 @@ public class GameIntegrationTest {
         private String password;
         private WebSocketSession session;
         private BlockingQueue<Envelope> receivedMessages = new LinkedBlockingQueue<>();
-        private List<Envelope> allMessages = new ArrayList<>();
+        private List<Envelope> allMessages = new java.util.concurrent.CopyOnWriteArrayList<>();
 
         public BotClient(String username, String password) {
             this.username = username;

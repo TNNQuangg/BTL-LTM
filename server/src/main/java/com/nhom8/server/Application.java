@@ -15,12 +15,13 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 public class Application {
 
     public static void main(String[] args) {
-        SpringApplication.run(Application.class, args);
+        var ctx = SpringApplication.run(Application.class, args);
+        String port = ctx.getEnvironment().getProperty("server.port", "8080");
         System.out.println("[SERVER] ================================================");
         System.out.println("[SERVER]   Vẽ Hình Đoán Ý - Spring Boot Server (Nhóm 8)");
-        System.out.println("[SERVER]   Đang lắng nghe tại cổng: 9999");
-        System.out.println("[SERVER]   WebSocket endpoint: ws://localhost:9999/ws");
-        System.out.println("[SERVER]   Chờ kết nối từ Client React...");
+        System.out.println("[SERVER]   Đang lắng nghe tại cổng: " + port);
+        System.out.println("[SERVER]   WebSocket endpoint: ws://localhost:" + port + "/ws/game");
+        System.out.println("[SERVER]   Chờ kết nối từ Client JavaFX...");
         System.out.println("[SERVER] ================================================");
     }
 }

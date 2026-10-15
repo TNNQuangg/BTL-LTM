@@ -2,38 +2,37 @@
 
 Hệ thống trò chơi "Vẽ Hình Đoán Ý" nhiều người chơi thời gian thực (Pictionary Online) sử dụng kiến trúc WebSocket.
 
-- **Backend**: Java Core, WebSocket (`Java-WebSocket`), Hibernate ORM, MySQL DB, Gson, BCrypt.
-- **Frontend**: React 19, Vite, Framer Motion, Howler.js, Lucide Icons.
+- **Backend**: Java 21, Spring Boot WebSocket, Hibernate ORM, H2/MySQL, BCrypt.
+- **Client**: JavaFX Desktop.
 
 ---
 
 ## 🚀 HƯỚNG DẪN KHỞI CHẠY (QUICK START)
 
-Chi tiết đầy đủ xem tại: 📄 [HUONG_DAN_CHAY.md](file:///c:/Users/TUAN/Downloads/BTL%20LTM/HUONG_DAN_CHAY.md)
+Chi tiết đầy đủ xem tại: [HUONG_DAN_CHAY.md](HUONG_DAN_CHAY.md).
 
 ### 1. Bật Backend Server (Java Maven)
 Mở Terminal tại thư mục gốc dự án:
 ```bash
-mvn clean compile exec:java "-Dexec.mainClass=server.ServerCore"
+mvn -pl common install -DskipTests
+mvn -pl server spring-boot:run
 ```
-*(Server sẽ chạy tại `ws://localhost:9999`)*
+*(Server chạy tại `ws://localhost:8080/ws/game`.)*
 
 ---
 
-### 2. Bật Frontend Client (React Vite)
+### 2. Bật Client JavaFX
 Mở Terminal mới:
 ```bash
-cd client
-npm install   # (chỉ chạy ở lần đầu)
-npm run dev
+mvn -pl fx-client javafx:run
 ```
-*(Client sẽ chạy tại `http://localhost:5173`)*
+Mở thêm terminal và chạy lại lệnh để thử nhiều cửa sổ. Tài khoản `admin` mở màn **Quản trị** trong sảnh.
 
 ---
 
 ## ⚙️ CẤU HÌNH DATABASE
-Cấu hình kết nối MySQL nằm trong: `src/main/resources/hibernate.cfg.xml`
-- **Database**: `scribble_game`
-- **Port**: `3306`
-- **User**: `root`
-- **Password**: `123456`
+Mặc định dự án dùng H2 lưu tại `server/data/game_db.mv.db`. Cấu hình MySQL tùy chọn nằm trong `server/src/main/resources/application-mysql.properties`.
+
+## Đóng gói và demo LAN
+
+Tắt server đang chạy, rồi chạy `powershell -ExecutionPolicy Bypass -File .\scripts\build-demo.ps1`. Hai file ZIP được tạo trong `dist`: gói chạy Windows và gói mã nguồn. Hướng dẫn máy chủ, firewall và client nằm trong [demo/DEMO.md](demo/DEMO.md).

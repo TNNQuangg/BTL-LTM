@@ -7,6 +7,9 @@ import com.nhom8.server.game.Room;
 import com.nhom8.server.game.RoomManager;
 import com.nhom8.server.model.Friendship;
 import com.nhom8.server.model.User;
+import com.nhom8.server.model.CustomTopic;
+import com.nhom8.server.repository.CustomTopicRepository;
+import com.nhom8.server.util.TopicPool;
 import com.nhom8.common.message.Envelope;
 import com.nhom8.common.message.MessageType;
 import com.nhom8.server.repository.FriendshipRepository;
@@ -50,7 +53,23 @@ public class GameService {
     private final FriendshipRepository friendshipRepository;
 
     @org.springframework.beans.factory.annotation.Autowired
+    private CustomTopicRepository customTopicRepository;
+
+    @jakarta.annotation.PostConstruct
+    public void loadCustomTopics() {
+        refreshCustomTopics();
+    }
+
+    private void refreshCustomTopics() {
+        TopicPool.setCustomTopics(customTopicRepository.findAll().stream().map(CustomTopic::getWord).toList());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
     private com.nhom8.server.repository.ChatMessageRepository chatMessageRepository;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private FriendService friendService;
 
     /**
      * Constructor injection — Spring tự động inject các Repository.
@@ -97,6 +116,7 @@ public class GameService {
 
         try {
             com.nhom8.common.message.payload.LoginResultPayload payload = authService.login(username, password);
+            username = payload.getPlayer().getUsername();
             if (onlineClients.containsKey(username)) {
                 // Đóng connection cũ
                 ClientSession oldSession = onlineClients.get(username);
@@ -117,10 +137,14 @@ public class GameService {
             response.setSuccess(true);
             response.setContent("Đăng nhập thành công");
             response.put("player", payload.getPlayer());
+            User loggedInUser = userRepository.findByUsername(username);
+            response.put("role", loggedInUser != null ? loggedInUser.getRole() : "USER");
             handler.sendMessage(response);
 
             broadcastPlayerList();
             sendRoomList(handler);
+            sendFriendListToUser(username);
+            broadcastFriendListToFriends(username);
         } catch (Exception e) {
             handler.sendMessage(Envelope.error(MessageType.LOGIN_RESULT, e.getMessage()));
         }
@@ -143,10 +167,23 @@ public class GameService {
     // ========================================================================
 
     public void handleCreateRoom(ClientSession handler, Envelope request) {
+        if (!handler.isAuthenticated() || handler.getUsername() == null) {
+            handler.sendMessage(Envelope.error(MessageType.ROOM_RESPONSE, "Bạn cần đăng nhập trước khi tạo phòng."));
+            return;
+        }
+
+        if (handler.getCurrentRoomId() != null) {
+            handler.sendMessage(Envelope.error(MessageType.ROOM_RESPONSE, "Bạn đang ở trong một phòng khác."));
+            return;
+        }
+
         String roomName = request.getOrDefault("roomName", "Phòng " + handler.getUsername());
         Room room = roomManager.createRoom(handler, roomName);
 
         if (room != null) {
+            if (request.getData() != null && request.getData().has("requireApproval")) {
+                room.setRequireApproval(request.getBoolean("requireApproval", false));
+            }
             handler.setCurrentRoomId(room.getRoomId());
             Envelope response = Envelope.success(MessageType.ROOM_RESPONSE, "Tạo phòng thành công!");
             response.put("roomId", room.getRoomId());
@@ -158,6 +195,7 @@ public class GameService {
             response.put("maxRounds", room.getMaxRounds());
             response.put("drawTime", room.getDrawTime());
             response.put("language", room.getLanguage());
+            response.put("requireApproval", room.isRequireApproval());
             handler.sendMessage(response);
 
             broadcastRoomUpdate(room);
@@ -170,6 +208,16 @@ public class GameService {
     }
 
     public void handleJoinRoom(ClientSession handler, Envelope request) {
+        if (!handler.isAuthenticated() || handler.getUsername() == null) {
+            handler.sendMessage(Envelope.error(MessageType.ROOM_RESPONSE, "Bạn cần đăng nhập trước khi vào phòng."));
+            return;
+        }
+
+        if (handler.getCurrentRoomId() != null) {
+            handler.sendMessage(Envelope.error(MessageType.ROOM_RESPONSE, "Bạn đang ở trong một phòng khác."));
+            return;
+        }
+
         String roomId = request.get("roomId");
         Room room = roomManager.getRoom(roomId);
 
@@ -190,6 +238,27 @@ public class GameService {
             return;
         }
 
+        boolean isHost = room.getHostUsername().equalsIgnoreCase(handler.getUsername());
+        boolean isFriendOrInvited = room.isUserInvitedOrApproved(handler.getUsername()) || isFriendOfHost(room.getHostUsername(), handler.getUsername());
+        if (!isHost && room.isRequireApproval() && !isFriendOrInvited) {
+            ClientSession hostSession = onlineClients.get(room.getHostUsername());
+            if (hostSession != null && hostSession.isOpen()) {
+                Envelope reqToHost = new Envelope(MessageType.ROOM_JOIN_REQUEST);
+                reqToHost.put("roomId", room.getRoomId());
+                reqToHost.put("roomName", room.getRoomName());
+                reqToHost.put("applicantUsername", handler.getUsername());
+                reqToHost.put("applicantDisplayName", handler.getDisplayName());
+                reqToHost.put("requesterUsername", handler.getUsername());
+                reqToHost.put("requesterDisplayName", handler.getDisplayName());
+                hostSession.sendMessage(reqToHost);
+
+                Envelope pendingMsg = new Envelope(MessageType.ROOM_JOIN_PENDING);
+                pendingMsg.setContent("Phòng đang bật chế độ duyệt. Yêu cầu đã gửi tới chủ phòng @" + room.getHostUsername() + ", vui lòng chờ duyệt!");
+                handler.sendMessage(pendingMsg);
+                return;
+            }
+        }
+
         room.addPlayer(handler);
         handler.setCurrentRoomId(roomId);
 
@@ -203,6 +272,7 @@ public class GameService {
         response.put("maxRounds", room.getMaxRounds());
         response.put("drawTime", room.getDrawTime());
         response.put("language", room.getLanguage());
+        response.put("requireApproval", room.isRequireApproval());
         handler.sendMessage(response);
 
         broadcastRoomUpdate(room);
@@ -239,11 +309,7 @@ public class GameService {
         Room room = roomManager.getRoom(roomId);
         if (room == null) return;
 
-        boolean isReady = true;
-        Object readyVal = request.getData() != null ? request.getData().get("isReady") : null;
-        if (readyVal instanceof Boolean) {
-            isReady = (Boolean) readyVal;
-        }
+        boolean isReady = request.getBoolean("isReady", true);
 
         room.setPlayerReady(handler.getUsername(), isReady);
         broadcastRoomUpdate(room);
@@ -268,11 +334,15 @@ public class GameService {
         if (request.getData() != null && request.getData().has("language")) {
             room.setLanguage(request.getString("language"));
         }
+        if (request.getData() != null && request.getData().has("requireApproval")) {
+            room.setRequireApproval(request.getBoolean("requireApproval", room.isRequireApproval()));
+        }
         
         Envelope updateSettings = new Envelope(MessageType.ROOM_UPDATE_SETTINGS);
         updateSettings.put("maxRounds", room.getMaxRounds());
         updateSettings.put("drawTime", room.getDrawTime());
         updateSettings.put("language", room.getLanguage());
+        updateSettings.put("requireApproval", room.isRequireApproval());
         room.broadcast(updateSettings);
     }
 
@@ -373,7 +443,9 @@ public class GameService {
         }
 
         User me = userRepository.findByUsername(myUsername);
+        if (me == null) me = userRepository.findByUsernameIgnoreCase(myUsername);
         User target = userRepository.findByUsername(targetUsername);
+        if (target == null) target = userRepository.findByUsernameIgnoreCase(targetUsername);
         if (me == null || target == null) return;
 
         // Lưu tin nhắn vào DB
@@ -389,7 +461,10 @@ public class GameService {
         msg.put("timestamp", chat.getCreatedAt().toString());
 
         // Nếu người nhận đang online, gửi luôn
-        ClientSession targetSession = onlineClients.get(targetUsername);
+        ClientSession targetSession = onlineClients.get(target.getUsername());
+        if (targetSession == null) {
+            targetSession = onlineClients.get(targetUsername);
+        }
         if (targetSession != null) {
             targetSession.sendMessage(msg);
         }
@@ -402,37 +477,48 @@ public class GameService {
         ack.put("content", content);
         ack.put("timestamp", chat.getCreatedAt().toString());
         ack.put("isSelf", true);
-        ack.put("targetUsername", targetUsername);
+        ack.put("targetUsername", target.getUsername());
         handler.sendMessage(ack);
     }
 
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
     public void handleChatHistoryRequest(ClientSession handler, Envelope request) {
         String targetUsername = request.get("targetUsername");
         String myUsername = handler.getUsername();
 
         if (myUsername == null || targetUsername == null) return;
 
-        User me = userRepository.findByUsername(myUsername);
-        User target = userRepository.findByUsername(targetUsername);
-        if (me == null || target == null) return;
+        try {
+            User me = userRepository.findByUsername(myUsername);
+            if (me == null) me = userRepository.findByUsernameIgnoreCase(myUsername);
+            User target = userRepository.findByUsername(targetUsername);
+            if (target == null) target = userRepository.findByUsernameIgnoreCase(targetUsername);
+            if (me == null || target == null) return;
 
-        java.util.List<com.nhom8.server.model.ChatMessage> history = chatMessageRepository.findChatHistory(me, target);
-        java.util.List<java.util.Map<String, Object>> responseList = new java.util.ArrayList<>();
+            java.util.List<com.nhom8.server.model.ChatMessage> history = chatMessageRepository.findChatHistory(me, target);
+            java.util.List<java.util.Map<String, Object>> responseList = new java.util.ArrayList<>();
 
-        for (com.nhom8.server.model.ChatMessage c : history) {
-            java.util.Map<String, Object> map = new java.util.HashMap<>();
-            map.put("senderUsername", c.getSender().getUsername());
-            map.put("senderDisplayName", c.getSender().getDisplayName());
-            map.put("content", c.getContent());
-            map.put("timestamp", c.getCreatedAt().toString());
-            map.put("isSelf", c.getSender().getUsername().equals(myUsername));
-            responseList.add(map);
+            for (com.nhom8.server.model.ChatMessage c : history) {
+                java.util.Map<String, Object> map = new java.util.HashMap<>();
+                map.put("senderUsername", c.getSender().getUsername());
+                map.put("senderDisplayName", c.getSender().getDisplayName());
+                map.put("content", c.getContent());
+                map.put("timestamp", c.getCreatedAt().toString());
+                map.put("isSelf", c.getSender().getUsername().equals(myUsername));
+                responseList.add(map);
+            }
+
+            Envelope response = new Envelope(MessageType.CHAT_HISTORY_RESPONSE);
+            response.put("targetUsername", target.getUsername());
+            response.put("history", responseList);
+            handler.sendMessage(response);
+        } catch (Exception e) {
+            System.err.println("[GameService] Lỗi lấy lịch sử chat: " + e.getMessage());
+            Envelope response = new Envelope(MessageType.CHAT_HISTORY_RESPONSE);
+            response.put("targetUsername", targetUsername);
+            response.put("history", new java.util.ArrayList<>());
+            handler.sendMessage(response);
         }
-
-        Envelope response = new Envelope(MessageType.CHAT_HISTORY_RESPONSE);
-        response.put("targetUsername", targetUsername);
-        response.put("history", responseList);
-        handler.sendMessage(response);
     }
 
     // ========================================================================
@@ -447,7 +533,7 @@ public class GameService {
     }
 
     public void handleAdminGetUsers(ClientSession handler, Envelope request) {
-        if (!isAdmin(handler)) return;
+        if (!requireAdmin(handler, MessageType.ADMIN_USERS_RESPONSE)) return;
         List<User> allUsers = userRepository.findAllByOrderByRankingScoreDesc();
         List<Map<String, Object>> usersData = new ArrayList<>();
         for (User u : allUsers) {
@@ -464,9 +550,13 @@ public class GameService {
     }
 
     public void handleAdminUpdateScore(ClientSession handler, Envelope request) {
-        if (!isAdmin(handler)) return;
+        if (!requireAdmin(handler, MessageType.ADMIN_UPDATE_SCORE)) return;
         String targetUser = request.get("targetUser");
-        int newScore = request.get("newScore");
+        int newScore = request.getInt("newScore", -1);
+        if (targetUser == null || newScore < 0) {
+            handler.sendMessage(Envelope.error(MessageType.ADMIN_UPDATE_SCORE, "Dữ liệu điểm không hợp lệ."));
+            return;
+        }
 
         User user = userRepository.findByUsername(targetUser);
         if (user != null) {
@@ -479,14 +569,74 @@ public class GameService {
     }
 
     public void handleAdminDissolveRoom(ClientSession handler, Envelope request) {
-        if (!isAdmin(handler)) return;
+        if (!requireAdmin(handler, MessageType.ADMIN_DISSOLVE_ROOM)) return;
         String roomId = request.get("roomId");
         Room room = roomManager.getRoom(roomId);
         if (room != null) {
-            dissolveRoom(room);
+            dissolveRoom(room, "Phòng đã được quản trị viên giải tán.");
             handler.sendMessage(Envelope.success(MessageType.ADMIN_DISSOLVE_ROOM,
                     "Đã giải tán phòng " + roomId));
         }
+    }
+
+    private boolean requireAdmin(ClientSession handler, MessageType responseType) {
+        if (isAdmin(handler)) return true;
+        handler.sendMessage(Envelope.error(responseType, "Chỉ quản trị viên được thực hiện thao tác này."));
+        return false;
+    }
+
+    public void handleAdminGetRooms(ClientSession handler) {
+        if (!requireAdmin(handler, MessageType.ADMIN_GET_ROOMS)) return;
+        handler.sendMessage(Envelope.success(MessageType.ADMIN_GET_ROOMS, "Danh sách phòng")
+                .put("rooms", roomManager.getRoomListData()));
+    }
+
+    public void handleAdminStats(ClientSession handler) {
+        if (!requireAdmin(handler, MessageType.ADMIN_STATS)) return;
+        handler.sendMessage(Envelope.success(MessageType.ADMIN_STATS, "Thống kê hệ thống")
+                .put("totalUsers", userRepository.count())
+                .put("onlineUsers", onlineClients.size())
+                .put("activeRooms", roomManager.getRoomCount())
+                .put("totalMatches", matchRepository.count())
+                .put("totalPaintings", paintingRepository.count())
+                .put("customTopics", customTopicRepository.count()));
+    }
+
+    public void handleAdminTopics(ClientSession handler) {
+        if (!requireAdmin(handler, MessageType.ADMIN_TOPICS)) return;
+        handler.sendMessage(Envelope.success(MessageType.ADMIN_TOPICS, "Từ khóa tự thêm")
+                .put("topics", customTopicRepository.findAll().stream().map(CustomTopic::getWord).sorted().toList()));
+    }
+
+    public void handleAdminTopicAdd(ClientSession handler, Envelope request) {
+        if (!requireAdmin(handler, MessageType.ADMIN_TOPIC_ADD)) return;
+        String word = request.getString("word");
+        word = word == null ? "" : word.trim().replaceAll("\\s+", " ");
+        if (word.length() < 2 || word.length() > 100 || customTopicRepository.existsByWordIgnoreCase(word)) {
+            handler.sendMessage(Envelope.error(MessageType.ADMIN_TOPIC_ADD, "Từ khóa phải dài 2–100 ký tự và chưa tồn tại."));
+            return;
+        }
+        customTopicRepository.save(new CustomTopic(word));
+        refreshCustomTopics();
+        handler.sendMessage(Envelope.success(MessageType.ADMIN_TOPIC_ADD, "Đã thêm từ khóa: " + word));
+        handleAdminTopics(handler);
+        handleAdminStats(handler);
+    }
+
+    public void handleAdminTopicDelete(ClientSession handler, Envelope request) {
+        if (!requireAdmin(handler, MessageType.ADMIN_TOPIC_DELETE)) return;
+        String word = request.getString("word");
+        CustomTopic topic = customTopicRepository.findAll().stream()
+                .filter(t -> t.getWord().equalsIgnoreCase(word)).findFirst().orElse(null);
+        if (topic == null) {
+            handler.sendMessage(Envelope.error(MessageType.ADMIN_TOPIC_DELETE, "Không tìm thấy từ khóa."));
+            return;
+        }
+        customTopicRepository.delete(topic);
+        refreshCustomTopics();
+        handler.sendMessage(Envelope.success(MessageType.ADMIN_TOPIC_DELETE, "Đã xóa từ khóa: " + topic.getWord()));
+        handleAdminTopics(handler);
+        handleAdminStats(handler);
     }
 
     // ========================================================================
@@ -537,6 +687,50 @@ public class GameService {
         }
     }
 
+    /**
+     * Gửi danh sách bạn bè mới nhất tới người dùng cụ thể nếu họ đang online.
+     */
+    public void sendFriendListToUser(String username) {
+        if (username == null) return;
+        ClientSession session = onlineClients.get(username);
+        if (session != null && session.isOpen()) {
+            try {
+                List<Map<String, Object>> friends = friendService.getFriendList(username);
+                Envelope response = Envelope.success(MessageType.FRIEND_LIST, "Danh sách bạn bè.");
+                response.put("friends", friends);
+                session.sendMessage(response);
+            } catch (Exception e) {
+                System.err.println("[SERVER] Lỗi gửi friend list tới " + username + ": " + e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Broadcast danh sách bạn bè cập nhật tới tất cả bạn bè đang online của user.
+     * Kích hoạt ngay khi user đăng nhập, đăng xuất hoặc cập nhật hồ sơ.
+     */
+    public void broadcastFriendListToFriends(String username) {
+        if (username == null) return;
+        try {
+            User user = userRepository.findByUsername(username);
+            if (user == null) user = userRepository.findByUsernameIgnoreCase(username);
+            if (user == null) return;
+
+            List<Friendship> friendships = friendshipRepository.findAllAcceptedFriends(user.getUserId());
+            if (friendships != null) {
+                for (Friendship f : friendships) {
+                    User friendUser = (f.getSender().getUserId() != null && f.getSender().getUserId().equals(user.getUserId()))
+                            ? f.getReceiver() : f.getSender();
+                    if (friendUser != null && friendUser.getUsername() != null) {
+                        sendFriendListToUser(friendUser.getUsername());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("[SERVER] Lỗi broadcast friend status cho " + username + ": " + e.getMessage());
+        }
+    }
+
     // ========================================================================
     // XỬ LÝ MỜI VÀO PHÒNG
     // ========================================================================
@@ -584,6 +778,9 @@ public class GameService {
         Room room = roomManager.getRoom(roomId);
         if (room == null) return;
 
+        // Cho phép bạn bè này vào phòng trực tiếp mà không cần duyệt lại
+        room.inviteUser(targetUsername);
+
         // Gửi lời mời tới bạn bè
         Envelope invite = new Envelope(MessageType.ROOM_INVITE_NOTIFY);
         invite.put("roomId", roomId);
@@ -612,6 +809,46 @@ public class GameService {
         handleJoinRoom(handler, joinRequest);
     }
 
+    /**
+     * Chủ phòng phản hồi duyệt hoặc từ chối người lạ vào phòng chơi.
+     */
+    public void handleRoomJoinApproval(ClientSession handler, Envelope request) {
+        String roomId = handler.getCurrentRoomId();
+        if (roomId == null) return;
+        Room room = roomManager.getRoom(roomId);
+        if (room == null || !room.getHostUsername().equalsIgnoreCase(handler.getUsername())) return;
+
+        String targetUsername = request.get("targetUsername");
+        boolean approved = Boolean.TRUE.equals(request.get("approved"));
+        if (targetUsername == null) return;
+        ClientSession targetSession = onlineClients.get(targetUsername);
+
+        if (targetSession == null || !targetSession.isOpen()) return;
+
+        if (approved) {
+            room.approveUser(targetUsername);
+            Envelope joinReq = new Envelope(MessageType.ROOM_JOIN);
+            joinReq.put("roomId", roomId);
+            handleJoinRoom(targetSession, joinReq);
+        } else {
+            Envelope rejMsg = Envelope.error(MessageType.ROOM_RESPONSE, "Chủ phòng @" + handler.getUsername() + " đã từ chối yêu cầu vào phòng của bạn.");
+            targetSession.sendMessage(rejMsg);
+        }
+    }
+
+    private boolean isFriendOfHost(String hostUsername, String username) {
+        if (hostUsername == null || username == null) return false;
+        try {
+            List<Map<String, Object>> friends = friendService.getFriendList(hostUsername);
+            for (Map<String, Object> f : friends) {
+                if (username.equalsIgnoreCase((String) f.get("username"))) {
+                    return true;
+                }
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
     // ========================================================================
     // XỬ LÝ NGẮT KẾT NỐI
     // ========================================================================
@@ -619,7 +856,8 @@ public class GameService {
     public void handleDisconnect(ClientSession handler) {
         String username = handler.getUsername();
         if (username != null) {
-            onlineClients.remove(username);
+            boolean wentOffline = onlineClients.remove(username, handler);
+            if (wentOffline) broadcastFriendListToFriends(username);
 
             String roomId = handler.getCurrentRoomId();
             if (roomId != null) {
@@ -727,25 +965,296 @@ public class GameService {
         msg.put("maxRounds", room.getMaxRounds());
         msg.put("drawTime", room.getDrawTime());
         msg.put("language", room.getLanguage());
+        msg.put("requireApproval", room.isRequireApproval());
 
         room.broadcast(msg);
     }
 
     private void dissolveRoom(Room room) {
-        Envelope dissolveMsg = new Envelope(MessageType.ROOM_DISSOLVED);
-        dissolveMsg.setContent("Phòng đã bị giải tán do không đủ người chơi (tối thiểu "
+        dissolveRoom(room, "Phòng đã bị giải tán do không đủ người chơi (tối thiểu "
                 + Room.MIN_PLAYERS + " người).");
+    }
+
+    private void dissolveRoom(Room room, String reason) {
+        Envelope dissolveMsg = new Envelope(MessageType.ROOM_DISSOLVED);
+        dissolveMsg.setContent(reason);
         room.broadcast(dissolveMsg);
 
         for (ClientSession handler : room.getPlayers()) {
             handler.setCurrentRoomId(null);
         }
 
-        room.getGameSession().endGame();
+        room.getGameSession().cancelGame();
         roomManager.removeRoom(room.getRoomId());
 
         broadcastPlayerList();
         broadcastRoomList();
+    }
+
+    // ========================================================================
+    // XỬ LÝ HỆ THỐNG BẠN BÈ (Delegate to FriendService)
+    // ========================================================================
+
+    public void handleFriendRequest(ClientSession handler, Envelope request) {
+        String targetUsername = request.get("targetUsername");
+        if (handler.getUsername() == null || targetUsername == null) return;
+        try {
+            friendService.sendFriendRequest(handler.getUsername(), targetUsername);
+            handler.sendMessage(Envelope.success(MessageType.FRIEND_REQUEST,
+                    "Đã gửi lời mời kết bạn tới " + targetUsername + "."));
+        } catch (Exception e) {
+            handler.sendMessage(Envelope.error(MessageType.FRIEND_REQUEST, e.getMessage()));
+        }
+    }
+
+    public void handleFriendResponse(ClientSession handler, Envelope request) {
+        String senderUsername = request.get("senderUsername");
+        boolean accept = request.getBoolean("accept", false);
+        if (handler.getUsername() == null || senderUsername == null) return;
+        try {
+            friendService.respondFriendRequest(handler.getUsername(), senderUsername, accept);
+            handler.sendMessage(Envelope.success(MessageType.FRIEND_RESPONSE,
+                    accept ? "Đã chấp nhận lời mời kết bạn." : "Đã từ chối lời mời kết bạn."));
+        } catch (Exception e) {
+            handler.sendMessage(Envelope.error(MessageType.FRIEND_RESPONSE, e.getMessage()));
+        }
+    }
+
+    public void handleFriendList(ClientSession handler, Envelope request) {
+        if (handler.getUsername() == null) return;
+        try {
+            List<Map<String, Object>> friends = friendService.getFriendList(handler.getUsername());
+            Envelope response = Envelope.success(MessageType.FRIEND_LIST, "Danh sách bạn bè.");
+            response.put("friends", friends);
+            handler.sendMessage(response);
+        } catch (Exception e) {
+            handler.sendMessage(Envelope.error(MessageType.FRIEND_LIST, e.getMessage()));
+        }
+    }
+
+    public void handleFriendRemove(ClientSession handler, Envelope request) {
+        String targetUsername = request.get("targetUsername");
+        if (handler.getUsername() == null || targetUsername == null) return;
+        try {
+            friendService.removeFriend(handler.getUsername(), targetUsername);
+            handler.sendMessage(Envelope.success(MessageType.FRIEND_REMOVE,
+                    "Đã xóa bạn bè " + targetUsername + "."));
+        } catch (Exception e) {
+            handler.sendMessage(Envelope.error(MessageType.FRIEND_REMOVE, e.getMessage()));
+        }
+    }
+
+    public void handleFriendPendingList(ClientSession handler, Envelope request) {
+        if (handler.getUsername() == null) return;
+        try {
+            List<Map<String, Object>> pending = friendService.getPendingRequests(handler.getUsername());
+            Envelope response = Envelope.success(MessageType.FRIEND_PENDING_LIST, "Danh sách lời mời đang chờ.");
+            response.put("pendingRequests", pending);
+            handler.sendMessage(response);
+        } catch (Exception e) {
+            handler.sendMessage(Envelope.error(MessageType.FRIEND_PENDING_LIST, e.getMessage()));
+        }
+    }
+
+    // ========================================================================
+    // TÌM KIẾM NGƯỜI CHƠI
+    // ========================================================================
+
+    public void handleSearchPlayer(ClientSession handler, Envelope request) {
+        String keyword = request.get("keyword");
+        if (keyword == null || keyword.trim().isEmpty()) return;
+
+        List<User> results = userRepository.findByUsernameContainingIgnoreCase(keyword.trim());
+        List<User> displayResults = userRepository.findByDisplayNameContainingIgnoreCase(keyword.trim());
+
+        // Hợp nhất kết quả, loại trùng
+        Set<String> seen = new HashSet<>();
+        List<Map<String, Object>> playerList = new ArrayList<>();
+        for (User u : results) {
+            if (seen.add(u.getUsername())) {
+                Map<String, Object> info = new HashMap<>();
+                info.put("username", u.getUsername());
+                info.put("displayName", u.getDisplayName());
+                info.put("avatar", u.getAvatar());
+                info.put("rankingScore", u.getRankingScore());
+                info.put("online", isUserOnline(u.getUsername()));
+                playerList.add(info);
+            }
+        }
+        for (User u : displayResults) {
+            if (seen.add(u.getUsername())) {
+                Map<String, Object> info = new HashMap<>();
+                info.put("username", u.getUsername());
+                info.put("displayName", u.getDisplayName());
+                info.put("avatar", u.getAvatar());
+                info.put("rankingScore", u.getRankingScore());
+                info.put("online", isUserOnline(u.getUsername()));
+                playerList.add(info);
+            }
+        }
+
+        Envelope response = Envelope.success(MessageType.SEARCH_PLAYER, "Kết quả tìm kiếm.");
+        response.put("results", playerList);
+        handler.sendMessage(response);
+    }
+
+    // ========================================================================
+    // BẢNG XẾP HẠNG
+    // ========================================================================
+
+    public void handleLeaderboard(ClientSession handler, Envelope request) {
+        List<User> topUsers = userRepository.findTop50ByOrderByRankingScoreDesc();
+        List<Map<String, Object>> leaderboard = new ArrayList<>();
+        int rank = 1;
+        for (User u : topUsers) {
+            Map<String, Object> entry = new HashMap<>();
+            entry.put("rank", rank++);
+            entry.put("username", u.getUsername());
+            entry.put("displayName", u.getDisplayName());
+            entry.put("avatar", u.getAvatar());
+            entry.put("rankingScore", u.getRankingScore());
+            entry.put("online", isUserOnline(u.getUsername()));
+            leaderboard.add(entry);
+        }
+        Envelope response = Envelope.success(MessageType.LEADERBOARD, "Bảng xếp hạng.");
+        response.put("leaderboard", leaderboard);
+        handler.sendMessage(response);
+    }
+
+    public void handleProfileRequest(ClientSession handler, Envelope envelope) {
+        String targetUsername = envelope.getString("username");
+        if (targetUsername == null || targetUsername.trim().isEmpty()) {
+            targetUsername = handler.getUsername();
+        }
+        if (targetUsername == null || targetUsername.trim().isEmpty()) {
+            handler.sendMessage(Envelope.error(MessageType.PROFILE_RESPONSE, "Chưa đăng nhập."));
+            return;
+        }
+
+        User user = authService.getProfile(targetUsername);
+        if (user == null) {
+            handler.sendMessage(Envelope.error(MessageType.PROFILE_RESPONSE, "Không tìm thấy người chơi: " + targetUsername));
+            return;
+        }
+
+        List<com.nhom8.server.model.MatchResult> results = matchResultRepository.findByUserWithMatchOrderByStartedAtDesc(user);
+        int totalMatches = results.size();
+        int totalPoints = results.stream().mapToInt(com.nhom8.server.model.MatchResult::getTotalPoints).sum();
+        int winCount = 0;
+        for (com.nhom8.server.model.MatchResult mr : results) {
+            if (mr.getMatch() != null) {
+                List<com.nhom8.server.model.MatchResult> allResults = matchResultRepository.findByMatch_MatchId(mr.getMatch().getMatchId());
+                int maxScore = allResults.stream().mapToInt(com.nhom8.server.model.MatchResult::getTotalPoints).max().orElse(0);
+                if (mr.getTotalPoints() >= maxScore && mr.getTotalPoints() > 0) {
+                    winCount++;
+                }
+            }
+        }
+
+        Envelope response = Envelope.success(MessageType.PROFILE_RESPONSE, "Hồ sơ cá nhân.");
+        response.put("username", user.getUsername());
+        response.put("displayName", user.getDisplayName());
+        response.put("avatar", user.getAvatar() != null ? user.getAvatar() : "1");
+        response.put("rankingScore", user.getRankingScore() != null ? user.getRankingScore() : 0);
+        response.put("createdAt", user.getCreatedAt() != null ? user.getCreatedAt().toString() : "");
+        response.put("totalMatches", totalMatches);
+        response.put("totalPoints", totalPoints);
+        response.put("winCount", winCount);
+        response.putBoolean("isSelf", targetUsername.equalsIgnoreCase(handler.getUsername()));
+        handler.sendMessage(response);
+    }
+
+    public void handleUpdateProfile(ClientSession handler, Envelope envelope) {
+        if (handler.getUsername() == null || handler.getUsername().isEmpty()) {
+            handler.sendMessage(Envelope.error(MessageType.UPDATE_PROFILE_RESPONSE, "Bạn chưa đăng nhập."));
+            return;
+        }
+
+        String newDisplayName = envelope.getString("newDisplayName");
+        String newAvatar = envelope.getString("newAvatar");
+        String oldPassword = envelope.getString("oldPassword");
+        String newPassword = envelope.getString("newPassword");
+
+        try {
+            User updatedUser = authService.updateProfile(handler.getUsername(), newDisplayName, newAvatar, oldPassword, newPassword);
+            handler.setDisplayName(updatedUser.getDisplayName());
+
+            Envelope response = Envelope.success(MessageType.UPDATE_PROFILE_RESPONSE, "Cập nhật thông tin cá nhân thành công!");
+            response.put("username", updatedUser.getUsername());
+            response.put("displayName", updatedUser.getDisplayName());
+            response.put("avatar", updatedUser.getAvatar());
+            response.put("rankingScore", updatedUser.getRankingScore());
+            handler.sendMessage(response);
+
+            // Gửi lại danh sách người chơi toàn hệ thống và cập nhật bạn bè
+            broadcastPlayerList();
+            broadcastFriendListToFriends(handler.getUsername());
+        } catch (IllegalArgumentException e) {
+            handler.sendMessage(Envelope.error(MessageType.UPDATE_PROFILE_RESPONSE, e.getMessage()));
+        } catch (Exception e) {
+            handler.sendMessage(Envelope.error(MessageType.UPDATE_PROFILE_RESPONSE, "Lỗi cập nhật: " + e.getMessage()));
+        }
+    }
+
+    public void handleMatchHistory(ClientSession handler, Envelope envelope) {
+        String targetUsername = envelope.getString("username");
+        if (targetUsername == null || targetUsername.trim().isEmpty()) {
+            targetUsername = handler.getUsername();
+        }
+        if (targetUsername == null) {
+            handler.sendMessage(Envelope.error(MessageType.MATCH_HISTORY_RESPONSE, "Chưa đăng nhập."));
+            return;
+        }
+
+        User user = authService.getProfile(targetUsername);
+        if (user == null) {
+            handler.sendMessage(Envelope.error(MessageType.MATCH_HISTORY_RESPONSE, "Không tìm thấy người chơi."));
+            return;
+        }
+
+        List<com.nhom8.server.model.MatchResult> results = matchResultRepository.findByUserWithMatchOrderByStartedAtDesc(user);
+        List<Map<String, Object>> historyList = new ArrayList<>();
+        java.time.format.DateTimeFormatter fmt = java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
+
+        for (com.nhom8.server.model.MatchResult mr : results) {
+            if (historyList.size() >= 30) break; // Giới hạn 30 trận gần nhất
+            Map<String, Object> item = new HashMap<>();
+            item.put("resultId", mr.getResultId());
+            if (mr.getMatch() != null) {
+                item.put("matchId", mr.getMatch().getMatchId());
+                item.put("roomId", mr.getMatch().getRoomId());
+                item.put("startedAt", mr.getMatch().getStartedAt() != null ? mr.getMatch().getStartedAt().format(fmt) : "");
+                item.put("endedAt", mr.getMatch().getEndedAt() != null ? mr.getMatch().getEndedAt().format(fmt) : "");
+
+                List<com.nhom8.server.model.MatchResult> allResults = matchResultRepository.findByMatch_MatchId(mr.getMatch().getMatchId());
+                allResults.sort((a, b) -> Integer.compare(b.getTotalPoints(), a.getTotalPoints()));
+                int rank = 1;
+                for (int i = 0; i < allResults.size(); i++) {
+                    if (allResults.get(i).getResultId().equals(mr.getResultId())) {
+                        rank = i + 1;
+                        break;
+                    }
+                }
+                item.put("rank", rank);
+                item.put("totalPlayers", allResults.size());
+            } else {
+                item.put("matchId", 0);
+                item.put("roomId", "—");
+                item.put("startedAt", "");
+                item.put("endedAt", "");
+                item.put("rank", 1);
+                item.put("totalPlayers", 1);
+            }
+            item.put("pointsDrawn", mr.getPointsDrawn() != null ? mr.getPointsDrawn() : 0);
+            item.put("pointsGuess", mr.getPointsGuess() != null ? mr.getPointsGuess() : 0);
+            item.put("totalPoints", mr.getTotalPoints());
+            historyList.add(item);
+        }
+
+        Envelope response = Envelope.success(MessageType.MATCH_HISTORY_RESPONSE, "Lịch sử trận đấu.");
+        response.put("history", historyList);
+        response.put("username", targetUsername);
+        handler.sendMessage(response);
     }
 
     // === Getters ===

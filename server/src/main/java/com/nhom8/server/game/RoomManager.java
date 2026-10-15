@@ -63,6 +63,7 @@ public class RoomManager {
             info.put("playerCount", room.getPlayerCount());
             info.put("maxPlayers", Room.MAX_PLAYERS);
             info.put("status", room.getStatus().name());
+            info.put("requireApproval", room.isRequireApproval());
             list.add(info);
         }
         return list;

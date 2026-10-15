@@ -88,9 +88,11 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
     private void dispatchMessage(ClientSession handler, Envelope envelope) {
         switch (envelope.getType()) {
             case LOGIN:
+            case LOGIN_REQUEST:
                 gameService.handleAuth(handler, envelope);
                 break;
             case REGISTER:
+            case REGISTER_REQUEST:
                 gameService.handleRegister(handler, envelope);
                 break;
             case PLAYER_LIST:
@@ -101,12 +103,15 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
                 gameService.sendRoomList(handler);
                 break;
             case ROOM_CREATE:
+            case CREATE_ROOM:
                 gameService.handleCreateRoom(handler, envelope);
                 break;
             case ROOM_JOIN:
+            case JOIN_ROOM:
                 gameService.handleJoinRoom(handler, envelope);
                 break;
             case ROOM_LEAVE:
+            case LEAVE_ROOM:
                 gameService.handleLeaveRoom(handler, envelope);
                 break;
             case READY:
@@ -121,13 +126,13 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
                 gameService.handleRoomKickPlayer(handler, envelope);
                 break;
             case ROOM_CHAT:
+            case ROOM_CHAT_SEND:
                 gameService.handleRoomChatSend(handler, envelope);
                 break;
             case TOPIC_SELECT:
                 gameService.handleTopicSelect(handler, envelope);
                 break;
             case STROKE_BATCH:
-            case DRAW_DATA:
                 gameService.handleDrawData(handler, envelope);
                 break;
             case DRAW_SUBMIT:
@@ -142,11 +147,78 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
             case ROOM_INVITE_RESPOND:
                 gameService.handleRoomInviteRespond(handler, envelope);
                 break;
+            case ROOM_JOIN_APPROVAL:
+                gameService.handleRoomJoinApproval(handler, envelope);
+                break;
             case CHAT_PRIVATE:
+            case DIRECT_MESSAGE_SEND:
                 gameService.handleDirectMessageSend(handler, envelope);
                 break;
             case CHAT_HISTORY:
+            case CHAT_HISTORY_REQUEST:
                 gameService.handleChatHistoryRequest(handler, envelope);
+                break;
+            case FRIEND_REQUEST:
+            case FRIEND_REQUEST_SEND:
+                gameService.handleFriendRequest(handler, envelope);
+                break;
+            case FRIEND_RESPONSE:
+            case FRIEND_REQUEST_RESPOND:
+                gameService.handleFriendResponse(handler, envelope);
+                break;
+            case FRIEND_LIST:
+            case FRIEND_LIST_REQUEST:
+                gameService.handleFriendList(handler, envelope);
+                break;
+            case FRIEND_REMOVE:
+                gameService.handleFriendRemove(handler, envelope);
+                break;
+            case FRIEND_PENDING_LIST:
+                gameService.handleFriendPendingList(handler, envelope);
+                break;
+            case SEARCH_PLAYER:
+            case SEARCH_USER_REQUEST:
+                gameService.handleSearchPlayer(handler, envelope);
+                break;
+            case LEADERBOARD:
+            case LEADERBOARD_REQUEST:
+                gameService.handleLeaderboard(handler, envelope);
+                break;
+            case PROFILE:
+            case PROFILE_REQUEST:
+                gameService.handleProfileRequest(handler, envelope);
+                break;
+            case UPDATE_PROFILE:
+            case UPDATE_PROFILE_REQUEST:
+                gameService.handleUpdateProfile(handler, envelope);
+                break;
+            case MATCH_HISTORY:
+            case MATCH_HISTORY_REQUEST:
+                gameService.handleMatchHistory(handler, envelope);
+                break;
+            case ADMIN_GET_USERS:
+                gameService.handleAdminGetUsers(handler, envelope);
+                break;
+            case ADMIN_UPDATE_SCORE:
+                gameService.handleAdminUpdateScore(handler, envelope);
+                break;
+            case ADMIN_DISSOLVE_ROOM:
+                gameService.handleAdminDissolveRoom(handler, envelope);
+                break;
+            case ADMIN_GET_ROOMS:
+                gameService.handleAdminGetRooms(handler);
+                break;
+            case ADMIN_STATS:
+                gameService.handleAdminStats(handler);
+                break;
+            case ADMIN_TOPICS:
+                gameService.handleAdminTopics(handler);
+                break;
+            case ADMIN_TOPIC_ADD:
+                gameService.handleAdminTopicAdd(handler, envelope);
+                break;
+            case ADMIN_TOPIC_DELETE:
+                gameService.handleAdminTopicDelete(handler, envelope);
                 break;
             default:
                 System.out.println("[SERVER] Chưa hỗ trợ loại thông điệp: " + envelope.getType());

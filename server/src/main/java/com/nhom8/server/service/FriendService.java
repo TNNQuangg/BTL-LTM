@@ -34,7 +34,9 @@ public class FriendService {
         }
 
         User me = userRepository.findByUsername(myUsername);
+        if (me == null) me = userRepository.findByUsernameIgnoreCase(myUsername);
         User target = userRepository.findByUsername(targetUsername);
+        if (target == null) target = userRepository.findByUsernameIgnoreCase(targetUsername);
         if (me == null || target == null) {
             throw new IllegalArgumentException("Người chơi không tồn tại.");
         }
@@ -62,7 +64,9 @@ public class FriendService {
 
     public void respondFriendRequest(String myUsername, String senderUsername, boolean isAccept) {
         User me = userRepository.findByUsername(myUsername);
+        if (me == null) me = userRepository.findByUsernameIgnoreCase(myUsername);
         User sender = userRepository.findByUsername(senderUsername);
+        if (sender == null) sender = userRepository.findByUsernameIgnoreCase(senderUsername);
 
         if (me == null || sender == null) return;
 
@@ -72,6 +76,8 @@ public class FriendService {
                 friendship.setStatus(Friendship.FriendshipStatus.ACCEPTED);
                 friendshipRepository.save(friendship);
                 gameService.notifyFriendAcceptViaWS(sender, me);
+                gameService.sendFriendListToUser(sender.getUsername());
+                gameService.sendFriendListToUser(me.getUsername());
             } else {
                 friendship.setStatus(Friendship.FriendshipStatus.REJECTED);
                 friendshipRepository.save(friendship);
@@ -83,24 +89,41 @@ public class FriendService {
 
     public void removeFriend(String myUsername, String friendUsername) {
         User me = userRepository.findByUsername(myUsername);
+        if (me == null) me = userRepository.findByUsernameIgnoreCase(myUsername);
         User friendUser = userRepository.findByUsername(friendUsername);
+        if (friendUser == null) friendUser = userRepository.findByUsernameIgnoreCase(friendUsername);
         if (me == null || friendUser == null) return;
 
         Friendship friendship = friendshipRepository.findByUsers(me, friendUser);
         if (friendship != null && friendship.getStatus() == Friendship.FriendshipStatus.ACCEPTED) {
             friendshipRepository.delete(friendship);
             gameService.notifyFriendRemoveViaWS(friendUser, me);
+            gameService.sendFriendListToUser(friendUser.getUsername());
+            gameService.sendFriendListToUser(me.getUsername());
         }
     }
 
     public List<Map<String, Object>> getFriendList(String username) {
         User user = userRepository.findByUsername(username);
+        if (user == null) user = userRepository.findByUsernameIgnoreCase(username);
         if (user == null) return new ArrayList<>();
 
         List<Friendship> friendships = friendshipRepository.findAllAcceptedFriends(user.getUserId());
         List<Map<String, Object>> result = new ArrayList<>();
         for (Friendship f : friendships) {
-            User friend = f.getSender().equals(user) ? f.getReceiver() : f.getSender();
+            User friend;
+            boolean isSenderMe = (f.getSender().getUserId() != null && f.getSender().getUserId().equals(user.getUserId()))
+                    || (f.getSender().getUsername() != null && f.getSender().getUsername().equalsIgnoreCase(user.getUsername()));
+            if (isSenderMe) {
+                friend = f.getReceiver();
+            } else {
+                friend = f.getSender();
+            }
+
+            if (friend == null || friend.getUsername() == null || friend.getUsername().equalsIgnoreCase(user.getUsername())) {
+                continue;
+            }
+
             Map<String, Object> friendMap = new HashMap<>();
             friendMap.put("username", friend.getUsername());
             friendMap.put("displayName", friend.getDisplayName());
@@ -114,6 +137,7 @@ public class FriendService {
 
     public List<Map<String, Object>> getPendingRequests(String username) {
         User user = userRepository.findByUsername(username);
+        if (user == null) user = userRepository.findByUsernameIgnoreCase(username);
         if (user == null) return new ArrayList<>();
 
         List<Friendship> pending = friendshipRepository.findPendingRequestsForUser(user.getUserId());

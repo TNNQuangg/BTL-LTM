@@ -1,0 +1,319 @@
+/* =========================================================
+   Scribble It! - Nhóm 8
+   Hand-drawn Sketch / Cartoon Doodle Style Sheet
+   ========================================================= */
+
+.root, root {
+    -fx-primary: #F5C800;
+    -fx-ink: #000000;
+    -fx-background-color: -fx-primary;
+    -fx-font-family: "Patrick Hand";
+    -fx-font-size: 18px;
+    -fx-text-fill: -fx-ink;
+}
+
+.button {
+    -fx-font-family: "Patrick Hand";
+    -fx-cursor: hand;
+    -fx-background-insets: 0;
+}
+
+.button:disabled {
+    -fx-opacity: 0.58;
+    -fx-cursor: default;
+}
+
+.label {
+    -fx-font-family: "Patrick Hand";
+    -fx-text-fill: -fx-ink;
+}
+
+.title-label {
+    -fx-font-family: "Amatic SC";
+    -fx-font-size: 64px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -fx-ink;
+}
+
+/* Nút menu dạng "cây bút chì" */
+.pencil-button {
+    -fx-background-color: -fx-primary;
+    -fx-border-color: -fx-ink;
+    -fx-border-width: 3;
+    -fx-border-radius: 4 40 40 4;
+    -fx-background-radius: 4 40 40 4;
+    -fx-font-family: "Amatic SC";
+    -fx-font-size: 36px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -fx-ink;
+    -fx-pref-width: 300;
+    -fx-pref-height: 52;
+    -fx-cursor: hand;
+    -fx-alignment: center;
+}
+
+.pencil-button:hover {
+    -fx-background-color: -fx-ink;
+    -fx-text-fill: -fx-primary;
+}
+
+/* Nút dạng bút chì kích thước vừa/nhỏ cho toolbar và dialog */
+.pencil-button-sm {
+    -fx-background-color: -fx-primary;
+    -fx-border-color: -fx-ink;
+    -fx-border-width: 2;
+    -fx-border-radius: 4 20 20 4;
+    -fx-background-radius: 4 20 20 4;
+    -fx-font-family: "Amatic SC";
+    -fx-font-size: 24px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -fx-ink;
+    -fx-padding: 4 18;
+    -fx-cursor: hand;
+}
+
+.pencil-button-sm:hover {
+    -fx-background-color: -fx-ink;
+    -fx-text-fill: -fx-primary;
+}
+
+/* Bong bóng thoại / khung nội dung */
+.speech-box {
+    -fx-background-color: -fx-primary;
+    -fx-border-color: -fx-ink;
+    -fx-border-width: 3;
+    -fx-padding: 20;
+}
+
+/* Khung nội dung màu trắng với viền vẽ phác sketch */
+.speech-box-white {
+    -fx-background-color: white;
+    -fx-border-color: -fx-ink;
+    -fx-border-width: 3;
+    -fx-padding: 20;
+    -fx-background-radius: 6;
+    -fx-border-radius: 6;
+}
+
+/* Ô nhập liệu (đăng nhập, đoán đáp án) */
+.text-field, .password-field {
+    -fx-background-color: white;
+    -fx-border-color: -fx-ink;
+    -fx-border-width: 2;
+    -fx-background-radius: 0;
+    -fx-border-radius: 0;
+    -fx-font-family: "Patrick Hand";
+    -fx-font-size: 18px;
+    -fx-text-fill: -fx-ink;
+}
+
+.text-field:focused, .password-field:focused {
+    -fx-border-color: -fx-ink;
+    -fx-border-width: 3;
+    -fx-effect: dropshadow(three-pass-box, rgba(245, 200, 0, 0.55), 8, 0, 0, 0);
+}
+
+.text-field, .password-field, .text-area {
+    -fx-padding: 8 11;
+    -fx-background-insets: 0;
+}
+
+.text-area {
+    -fx-background-color: white;
+    -fx-border-color: -fx-ink;
+    -fx-border-width: 2;
+    -fx-font-family: "Patrick Hand";
+    -fx-font-size: 17px;
+}
+
+.text-area:focused {
+    -fx-border-width: 3;
+    -fx-effect: dropshadow(three-pass-box, rgba(245, 200, 0, 0.55), 8, 0, 0, 0);
+}
+
+.check-box {
+    -fx-font-family: "Patrick Hand";
+    -fx-font-size: 16px;
+    -fx-text-fill: -fx-ink;
+    -fx-cursor: hand;
+    -fx-spacing: 9;
+}
+
+.check-box .box {
+    -fx-background-color: white;
+    -fx-border-color: -fx-ink;
+    -fx-border-width: 2;
+    -fx-background-radius: 4;
+    -fx-border-radius: 4;
+    -fx-min-width: 19;
+    -fx-min-height: 19;
+}
+
+.check-box:selected .box {
+    -fx-background-color: #F5C800;
+}
+
+.check-box:selected .mark {
+    -fx-background-color: -fx-ink;
+}
+
+.check-box:focused .box {
+    -fx-effect: dropshadow(three-pass-box, rgba(245, 200, 0, 0.7), 7, 0, 0, 0);
+}
+
+/* Thẻ tên người chơi góc phải */
+.name-tag {
+    -fx-background-color: -fx-ink;
+    -fx-text-fill: white;
+    -fx-font-family: "Patrick Hand";
+    -fx-font-size: 18px;
+    -fx-padding: 4 10 4 10;
+}
+
+/* Tùy chỉnh danh sách ListView kiểu sketch */
+.list-view {
+    -fx-background-color: white;
+    -fx-border-color: -fx-ink;
+    -fx-border-width: 2;
+    -fx-font-family: "Patrick Hand";
+    -fx-font-size: 16px;
+    -fx-background-insets: 0;
+}
+
+.list-cell {
+    -fx-font-family: "Patrick Hand";
+    -fx-font-size: 16px;
+    -fx-text-fill: -fx-ink;
+}
+
+.list-cell:filled:selected {
+    -fx-background-color: #F5C800;
+    -fx-text-fill: -fx-ink;
+    -fx-font-weight: bold;
+}
+
+.list-cell:filled:hover {
+    -fx-background-color: #FFF3B8;
+    -fx-text-fill: -fx-ink;
+}
+
+.combo-box, .color-picker {
+    -fx-background-color: white;
+    -fx-border-color: -fx-ink;
+    -fx-border-width: 2;
+    -fx-background-radius: 4;
+    -fx-border-radius: 4;
+    -fx-cursor: hand;
+}
+
+.combo-box:focused, .color-picker:focused {
+    -fx-border-width: 3;
+}
+
+.slider .track {
+    -fx-background-color: #E8E1C7;
+    -fx-background-radius: 8;
+}
+
+.slider .thumb {
+    -fx-background-color: #F5C800;
+    -fx-border-color: -fx-ink;
+    -fx-border-width: 2;
+    -fx-cursor: hand;
+}
+
+.scroll-bar:vertical .thumb, .scroll-bar:horizontal .thumb {
+    -fx-background-color: #D3B83D;
+    -fx-background-radius: 8;
+}
+
+.scroll-bar:vertical, .scroll-bar:horizontal {
+    -fx-background-color: #FFFDF0;
+}
+
+/* Modal Dialog phong cách Doodle */
+.doodle-dialog-box {
+    -fx-background-color: #FFFDF0;
+    -fx-border-color: -fx-ink;
+    -fx-border-width: 3;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-effect: dropshadow(three-pass-box, rgba(0, 0, 0, 0.35), 15, 0, 0, 6);
+    -fx-padding: 24;
+}
+
+/* Nút thành công / duyệt xanh lá */
+.pencil-button-success {
+    -fx-background-color: #2ECC71;
+    -fx-border-color: -fx-ink;
+    -fx-border-width: 2;
+    -fx-border-radius: 4 20 20 4;
+    -fx-background-radius: 4 20 20 4;
+    -fx-font-family: "Amatic SC";
+    -fx-font-size: 24px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -fx-ink;
+    -fx-padding: 4 18;
+    -fx-cursor: hand;
+}
+
+.pencil-button-success:hover {
+    -fx-background-color: -fx-ink;
+    -fx-text-fill: #2ECC71;
+}
+
+/* Nút hủy / nguy hiểm đỏ */
+.pencil-button-danger {
+    -fx-background-color: #FF5252;
+    -fx-border-color: -fx-ink;
+    -fx-border-width: 2;
+    -fx-border-radius: 4 20 20 4;
+    -fx-background-radius: 4 20 20 4;
+    -fx-font-family: "Amatic SC";
+    -fx-font-size: 24px;
+    -fx-font-weight: bold;
+    -fx-text-fill: white;
+    -fx-padding: 4 18;
+    -fx-cursor: hand;
+}
+
+.pencil-button-danger:hover {
+    -fx-background-color: -fx-ink;
+    -fx-text-fill: #FF5252;
+}
+
+/* Huy hiệu sao chép mã phòng */
+.copy-badge {
+    -fx-background-color: white;
+    -fx-border-color: -fx-ink;
+    -fx-border-width: 2;
+    -fx-border-style: dashed;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-padding: 4 12;
+    -fx-font-family: "Patrick Hand";
+    -fx-font-size: 16px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -fx-ink;
+    -fx-cursor: hand;
+}
+
+.copy-badge:hover {
+    -fx-background-color: #F5C800;
+    -fx-border-style: solid;
+}
+
+/* Toast thông báo nổi */
+.doodle-toast {
+    -fx-background-color: -fx-ink;
+    -fx-text-fill: #F5C800;
+    -fx-font-family: "Patrick Hand";
+    -fx-font-size: 18px;
+    -fx-font-weight: bold;
+    -fx-border-color: #F5C800;
+    -fx-border-width: 2;
+    -fx-background-radius: 20;
+    -fx-border-radius: 20;
+    -fx-padding: 8 22;
+    -fx-effect: dropshadow(three-pass-box, rgba(0, 0, 0, 0.4), 10, 0, 0, 4);
+}

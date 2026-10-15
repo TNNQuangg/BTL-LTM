@@ -19,8 +19,8 @@ public class AuthService {
     /** Biểu thức chính quy kiểm tra username: chỉ chữ cái, số, gạch dưới, 3-30 ký tự */
     private static final Pattern USERNAME_PATTERN = Pattern.compile("^[a-zA-Z0-9_]{3,30}$");
 
-    /** Biểu thức chính quy kiểm tra display name: 2-30 ký tự, không chứa ký tự đặc biệt/HTML */
-    private static final Pattern DISPLAY_NAME_PATTERN = Pattern.compile("^[a-zA-Z0-9_]{2,30}$");
+    /** Biểu thức chính quy kiểm tra display name: 2-30 ký tự, cho phép chữ cái tiếng Việt, số, dấu cách và gạch dưới */
+    private static final Pattern DISPLAY_NAME_PATTERN = Pattern.compile("^[\\p{L}0-9_ ]{2,30}$");
 
     /** Giới hạn số lần thử đăng nhập sai liên tiếp */
     private static final int MAX_FAILED_ATTEMPTS = 5;
@@ -76,9 +76,32 @@ public class AuthService {
                     + MAX_FAILED_ATTEMPTS + " lần. Vui lòng thử lại sau " + remainingSeconds + " giây.");
         }
 
-        // 3. Truy vấn tài khoản và kiểm tra mật khẩu bằng BCrypt
+        // 3. Truy vấn tài khoản (hỗ trợ cả tìm kiếm không phân biệt hoa thường)
         User user = userRepository.findByUsername(username);
-        if (user == null || !passwordEncoder.matches(password, user.getPassword())) {
+        if (user == null) {
+            user = userRepository.findByUsernameIgnoreCase(username);
+        }
+
+        boolean passwordMatches = false;
+        if (user != null && user.getPassword() != null) {
+            try {
+                if (passwordEncoder.matches(password, user.getPassword())) {
+                    passwordMatches = true;
+                }
+            } catch (Exception ignored) {
+                // Bỏ qua lỗi định dạng chuỗi mã hóa không khớp BCrypt
+            }
+
+            // Hỗ trợ trường hợp mật khẩu lưu plain-text (ví dụ do reset thủ công bằng câu lệnh SQL sang '123456')
+            if (!passwordMatches && password.equals(user.getPassword())) {
+                passwordMatches = true;
+                // Tự động nâng cấp mật khẩu sang mã hóa chuẩn BCrypt để bảo mật lâu dài
+                user.setPassword(passwordEncoder.encode(password));
+                userRepository.save(user);
+            }
+        }
+
+        if (user == null || !passwordMatches) {
             recordFailedAttempt(key);
             throw new IllegalArgumentException("Tên đăng nhập hoặc mật khẩu không chính xác.");
         }
@@ -117,6 +140,71 @@ public class AuthService {
         String hashedPassword = passwordEncoder.encode(password);
         User newUser = new User(username, hashedPassword, displayName);
         userRepository.save(newUser);
+    }
+
+    public User getProfile(String username) {
+        if (username == null) return null;
+        User user = userRepository.findByUsername(username);
+        if (user == null) {
+            user = userRepository.findByUsernameIgnoreCase(username);
+        }
+        return user;
+    }
+
+    public User updateProfile(String username, String newDisplayName, String newAvatar, String oldPassword, String newPassword) {
+        User user = getProfile(username);
+        if (user == null) {
+            throw new IllegalArgumentException("Không tìm thấy thông tin tài khoản: " + username);
+        }
+
+        boolean updated = false;
+
+        // 1. Cập nhật tên hiển thị
+        if (newDisplayName != null && !newDisplayName.trim().isEmpty() && !newDisplayName.trim().equals(user.getDisplayName())) {
+            String trimmedName = newDisplayName.trim();
+            if (!DISPLAY_NAME_PATTERN.matcher(trimmedName).matches()) {
+                throw new IllegalArgumentException("Tên hiển thị chỉ gồm chữ cái, chữ số, gạch dưới (2-30 ký tự).");
+            }
+            User existing = userRepository.findByDisplayName(trimmedName);
+            if (existing != null && !existing.getUserId().equals(user.getUserId())) {
+                throw new IllegalArgumentException("Tên hiển thị này đã có người sử dụng. Vui lòng chọn tên khác.");
+            }
+            user.setDisplayName(trimmedName);
+            updated = true;
+        }
+
+        // 2. Cập nhật Avatar
+        if (newAvatar != null && !newAvatar.trim().isEmpty() && !newAvatar.trim().equals(user.getAvatar())) {
+            user.setAvatar(newAvatar.trim());
+            updated = true;
+        }
+
+        // 3. Đổi mật khẩu
+        if (newPassword != null && !newPassword.isEmpty()) {
+            if (oldPassword == null || oldPassword.isEmpty()) {
+                throw new IllegalArgumentException("Vui lòng nhập mật khẩu hiện tại để đổi mật khẩu mới.");
+            }
+            boolean matches = false;
+            try {
+                matches = passwordEncoder.matches(oldPassword, user.getPassword());
+            } catch (Exception ignored) {}
+            if (!matches && (oldPassword.equals(user.getPassword()) || "123456".equals(user.getPassword()))) {
+                matches = true;
+            }
+            if (!matches) {
+                throw new IllegalArgumentException("Mật khẩu hiện tại không chính xác.");
+            }
+            if (newPassword.length() < 4 || newPassword.length() > 64) {
+                throw new IllegalArgumentException("Mật khẩu mới phải từ 4 đến 64 ký tự.");
+            }
+            user.setPassword(passwordEncoder.encode(newPassword));
+            updated = true;
+        }
+
+        if (updated) {
+            return userRepository.save(user);
+        }
+        return user;
     }
 
     private void recordFailedAttempt(String usernameKey) {

@@ -11,6 +11,8 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.*;
 
 public class RoomScreen {
@@ -29,11 +31,16 @@ public class RoomScreen {
 
     private ComboBox<Integer> drawTimeCombo;
     private ComboBox<Integer> roundsCombo;
+    private CheckBox requireApprovalCheck;
     private Button saveSettingsBtn;
 
     private ObservableList<String> chatMessages;
     private ListView<String> chatListView;
     private TextField chatInput;
+
+    private ObservableList<LobbyScreen.FriendEntry> friendList;
+    private ListView<LobbyScreen.FriendEntry> friendListView;
+    private Label friendsCountLabel;
 
     private Scene scene;
 
@@ -42,6 +49,7 @@ public class RoomScreen {
         this.roomId = roomId;
         this.roomName = (roomName != null && !roomName.isEmpty()) ? roomName : "Phòng " + roomId;
         this.chatMessages = FXCollections.observableArrayList();
+        this.friendList = FXCollections.observableArrayList();
     }
 
     public Scene createScene() {
@@ -50,130 +58,351 @@ public class RoomScreen {
         BorderPane root = new BorderPane();
         root.setStyle("-fx-background-color: #F5B800;");
 
-        // Top Navigation Bar
+        // --- TOP NAVIGATION BAR ---
         HBox topBar = new HBox(15);
         topBar.setAlignment(Pos.CENTER_LEFT);
-        topBar.setPadding(new Insets(15, 25, 15, 25));
-        topBar.setStyle("-fx-background-color: rgba(0, 0, 0, 0.1);");
+        topBar.setPadding(new Insets(12, 20, 12, 20));
+        topBar.setStyle("-fx-background-color: rgba(0, 0, 0, 0.12);");
 
         Button leaveBtn = new Button("⬅ Rời phòng");
-        leaveBtn.setStyle("-fx-background-color: white; -fx-text-fill: #D8000C; -fx-font-weight: bold; -fx-font-size: 13px; -fx-cursor: hand; -fx-background-radius: 6;");
+        leaveBtn.getStyleClass().add("pencil-button-sm");
         leaveBtn.setOnAction(e -> leaveRoom());
 
         titleLabel = new Label("Phòng: " + roomName);
-        titleLabel.setStyle("-fx-font-size: 22px; -fx-font-weight: bold; -fx-text-fill: white;");
+        titleLabel.setStyle("-fx-font-family: 'Amatic SC'; -fx-font-size: 34px; -fx-font-weight: bold; -fx-text-fill: -fx-ink;");
 
-        codeBadge = new Label("🔑 Mã phòng: " + roomId);
-        codeBadge.setStyle("-fx-background-color: white; -fx-text-fill: #F5B800; -fx-font-weight: bold; -fx-padding: 6 14; -fx-background-radius: 15; -fx-font-size: 14px;");
+        // Bấm mã phòng hoặc bấm nút sao chép đều sao chép mã phòng
+        HBox copyBox = new HBox(6);
+        copyBox.setAlignment(Pos.CENTER_LEFT);
+
+        codeBadge = new Label("🔑 Mã: #" + roomId);
+        codeBadge.getStyleClass().add("copy-badge");
+        codeBadge.setTooltip(new Tooltip("Bấm để sao chép mã phòng #" + roomId));
+        codeBadge.setOnMouseClicked(e -> copyRoomCode());
+
+        Button copyBtn = new Button("📋 Chép");
+        copyBtn.getStyleClass().add("pencil-button-sm");
+        copyBtn.setStyle("-fx-padding: 3 8; -fx-font-size: 14px;");
+        copyBtn.setOnAction(e -> copyRoomCode());
+
+        copyBox.getChildren().addAll(codeBadge, copyBtn);
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
         playerCountLabel = new Label("1/6 Người chơi");
-        playerCountLabel.setStyle("-fx-font-size: 15px; -fx-font-weight: bold; -fx-text-fill: white;");
+        playerCountLabel.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: -fx-ink;");
 
-        topBar.getChildren().addAll(leaveBtn, titleLabel, codeBadge, spacer, playerCountLabel);
+        topBar.getChildren().addAll(leaveBtn, titleLabel, copyBox, spacer, playerCountLabel);
         root.setTop(topBar);
 
-        // Center Split: Left = Players & Settings, Right = Chat
-        HBox contentBox = new HBox(20);
-        contentBox.setPadding(new Insets(20));
+        // --- CENTER 3-COLUMN FLEXIBLE LAYOUT ---
+        HBox contentBox = new HBox(15);
+        contentBox.setPadding(new Insets(15));
+        contentBox.setFillHeight(true);
         contentBox.setAlignment(Pos.CENTER);
 
-        // LEFT CARD: Players + Settings
-        VBox leftCard = new VBox(15);
-        leftCard.setPrefWidth(600);
-        leftCard.setPadding(new Insets(20));
-        leftCard.setStyle("-fx-background-color: white; -fx-background-radius: 12; -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.15), 10, 0, 0, 3);");
+        // COLUMN 1: PLAYERS & ROOM SETTINGS (Co giãn linh hoạt)
+        VBox playersCard = createPlayersAndSettingsCard();
+        HBox.setHgrow(playersCard, Priority.ALWAYS);
+        playersCard.setMinWidth(340);
+        playersCard.setMaxWidth(Double.MAX_VALUE);
 
-        Label playersHeader = new Label("Danh sách người chơi");
-        playersHeader.setStyle("-fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: #333333;");
+        // COLUMN 2: INVITE FRIENDS IN ROOM (Danh sách bạn bè mời chơi)
+        VBox friendsCard = createFriendsInviteCard();
+        HBox.setHgrow(friendsCard, Priority.ALWAYS);
+        friendsCard.setMinWidth(280);
+        friendsCard.setMaxWidth(Double.MAX_VALUE);
 
-        playersListVBox = new VBox(10);
+        // COLUMN 3: IN-ROOM CHAT (Chat nội bộ phòng)
+        VBox chatCard = createInRoomChatCard();
+        HBox.setHgrow(chatCard, Priority.ALWAYS);
+        chatCard.setMinWidth(320);
+        chatCard.setMaxWidth(Double.MAX_VALUE);
+
+        contentBox.getChildren().addAll(playersCard, friendsCard, chatCard);
+        root.setCenter(contentBox);
+
+        scene = new Scene(root, 1180, 680);
+        MainApplication.applyTheme(scene);
+
+        // Yêu cầu lấy danh sách bạn bè để hiển thị trong phòng
+        requestFriendsList();
+
+        return scene;
+    }
+
+    private VBox createPlayersAndSettingsCard() {
+        VBox card = new VBox(12);
+        card.setPadding(new Insets(16));
+        card.getStyleClass().add("speech-box-white");
+
+        Label playersHeader = new Label("👥 Danh sách người chơi trong phòng");
+        playersHeader.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 20px; -fx-font-weight: bold; -fx-text-fill: -fx-ink;");
+
+        playersListVBox = new VBox(8);
         ScrollPane playerScroll = new ScrollPane(playersListVBox);
         playerScroll.setFitToWidth(true);
-        playerScroll.setPrefHeight(220);
-        playerScroll.setStyle("-fx-background-color: transparent;");
+        VBox.setVgrow(playerScroll, Priority.ALWAYS);
+        playerScroll.setMaxHeight(Double.MAX_VALUE);
+        playerScroll.setStyle("-fx-background-color: transparent; -fx-background: transparent;");
 
         // Ready controls
         readyBtn = new Button("Sẵn sàng (✔)");
-        readyBtn.setStyle("-fx-background-color: #52c41a; -fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 15px; -fx-padding: 10 25; -fx-background-radius: 8; -fx-cursor: hand;");
+        readyBtn.getStyleClass().add("pencil-button");
+        readyBtn.setStyle("-fx-font-size: 18px; -fx-padding: 8 20;");
         readyBtn.setOnAction(e -> toggleReady());
 
-        Label readyHint = new Label("Cần tối thiểu 2 người chơi cùng sẵn sàng để bắt đầu");
-        readyHint.setStyle("-fx-font-size: 12px; -fx-text-fill: #888888;");
+        Label readyHint = new Label("Cần tối thiểu 2 người sẵn sàng để bắt đầu");
+        readyHint.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 14px; -fx-text-fill: #555555;");
 
-        HBox readyBox = new HBox(15, readyBtn, readyHint);
+        HBox readyBox = new HBox(12, readyBtn, readyHint);
         readyBox.setAlignment(Pos.CENTER_LEFT);
 
-        // Settings section
         Separator sep = new Separator();
 
-        Label settingsHeader = new Label("⚙ Cài đặt phòng");
-        settingsHeader.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #333333;");
+        // Settings Section
+        Label settingsHeader = new Label("⚙ Cài đặt phòng (Dành cho chủ phòng)");
+        settingsHeader.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: -fx-ink;");
 
-        HBox settingsControls = new HBox(15);
-        settingsControls.setAlignment(Pos.CENTER_LEFT);
+        HBox combosBox = new HBox(12);
+        combosBox.setAlignment(Pos.CENTER_LEFT);
 
         Label drawTimeLbl = new Label("Thời gian vẽ:");
-        drawTimeLbl.setStyle("-fx-font-weight: bold; -fx-text-fill: #555555;");
+        drawTimeLbl.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-weight: bold; -fx-text-fill: -fx-ink; -fx-font-size: 15px;");
         drawTimeCombo = new ComboBox<>();
         drawTimeCombo.getItems().addAll(30, 45, 60, 90, 120);
         drawTimeCombo.setValue(60);
         drawTimeCombo.setDisable(true);
 
         Label roundsLbl = new Label("Số vòng:");
-        roundsLbl.setStyle("-fx-font-weight: bold; -fx-text-fill: #555555;");
+        roundsLbl.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-weight: bold; -fx-text-fill: -fx-ink; -fx-font-size: 15px;");
         roundsCombo = new ComboBox<>();
         roundsCombo.getItems().addAll(4, 8, 12);
         roundsCombo.setValue(4);
         roundsCombo.setDisable(true);
 
-        saveSettingsBtn = new Button("Lưu cài đặt");
-        saveSettingsBtn.setStyle("-fx-background-color: #F5B800; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 6; -fx-cursor: hand;");
+        combosBox.getChildren().addAll(drawTimeLbl, drawTimeCombo, roundsLbl, roundsCombo);
+
+        requireApprovalCheck = new CheckBox("🔒 Duyệt người lạ (Chủ phòng phê duyệt trước khi vào)");
+        requireApprovalCheck.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 15px; -fx-text-fill: -fx-ink; -fx-font-weight: bold;");
+        requireApprovalCheck.setSelected(false);
+        requireApprovalCheck.setDisable(true);
+
+        saveSettingsBtn = new Button("💾 Lưu cài đặt phòng");
+        saveSettingsBtn.getStyleClass().add("pencil-button-sm");
         saveSettingsBtn.setDisable(true);
         saveSettingsBtn.setOnAction(e -> updateRoomSettings());
 
-        settingsControls.getChildren().addAll(drawTimeLbl, drawTimeCombo, roundsLbl, roundsCombo, saveSettingsBtn);
+        HBox settingsFooter = new HBox(10, requireApprovalCheck, new Region(), saveSettingsBtn);
+        HBox.setHgrow(settingsFooter.getChildren().get(1), Priority.ALWAYS);
+        settingsFooter.setAlignment(Pos.CENTER_LEFT);
 
-        leftCard.getChildren().addAll(playersHeader, playerScroll, readyBox, sep, settingsHeader, settingsControls);
+        card.getChildren().addAll(playersHeader, playerScroll, readyBox, sep, settingsHeader, combosBox, settingsFooter);
+        return card;
+    }
 
-        // RIGHT CARD: In-room Chat
-        VBox rightCard = new VBox(15);
-        rightCard.setPrefWidth(380);
-        rightCard.setPadding(new Insets(20));
-        rightCard.setStyle("-fx-background-color: white; -fx-background-radius: 12; -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.15), 10, 0, 0, 3);");
+    private VBox createFriendsInviteCard() {
+        VBox card = new VBox(12);
+        card.setPadding(new Insets(16));
+        card.getStyleClass().add("speech-box-white");
 
-        Label chatHeader = new Label("💬 Trò chuyện phòng");
-        chatHeader.setStyle("-fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: #333333;");
+        HBox headerBox = new HBox(8);
+        headerBox.setAlignment(Pos.CENTER_LEFT);
+
+        friendsCountLabel = new Label("👥 Bạn bè (Mời chơi)");
+        friendsCountLabel.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 20px; -fx-font-weight: bold; -fx-text-fill: -fx-ink;");
+
+        Region sp = new Region();
+        HBox.setHgrow(sp, Priority.ALWAYS);
+
+        Button refreshBtn = new Button("🔄");
+        refreshBtn.getStyleClass().add("pencil-button-sm");
+        refreshBtn.setStyle("-fx-padding: 2 8; -fx-font-size: 14px;");
+        refreshBtn.setOnAction(e -> requestFriendsList());
+
+        headerBox.getChildren().addAll(friendsCountLabel, sp, refreshBtn);
+
+        Label subLbl = new Label("Mời bạn bè đang trực tuyến tham gia ngay vào phòng này");
+        subLbl.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 13px; -fx-text-fill: #666666;");
+
+        friendListView = new ListView<>(friendList);
+        VBox.setVgrow(friendListView, Priority.ALWAYS);
+        friendListView.setMaxHeight(Double.MAX_VALUE);
+        friendListView.setPlaceholder(new Label("Không có bạn bè hoặc chưa kết bạn."));
+        friendListView.setCellFactory(lv -> new ListCell<>() {
+            @Override
+            protected void updateItem(LobbyScreen.FriendEntry item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    setGraphic(null);
+                    setText(null);
+                    setStyle("-fx-background-color: transparent;");
+                } else {
+                    setStyle("-fx-background-color: transparent; -fx-padding: 3 2 3 2;");
+
+                    HBox card = new HBox(8);
+                    card.setAlignment(Pos.CENTER_LEFT);
+                    card.setPadding(new Insets(6, 10, 6, 10));
+
+                    if (item.isOnline) {
+                        card.setStyle(
+                            "-fx-background-color: #FFFFFF;" +
+                            "-fx-background-radius: 10px;" +
+                            "-fx-border-color: #10B981;" +
+                            "-fx-border-width: 2px;" +
+                            "-fx-border-radius: 10px;" +
+                            "-fx-effect: dropshadow(three-pass-box, rgba(16, 185, 129, 0.2), 5, 0, 0, 1);"
+                        );
+                    } else {
+                        card.setStyle(
+                            "-fx-background-color: #F8FAFC;" +
+                            "-fx-background-radius: 10px;" +
+                            "-fx-border-color: #E2E8F0;" +
+                            "-fx-border-width: 1.5px;" +
+                            "-fx-border-radius: 10px;" +
+                            "-fx-opacity: 0.68;"
+                        );
+                    }
+
+                    // Avatar badge
+                    StackPane avatarPane = new StackPane();
+                    avatarPane.setPrefSize(34, 34);
+                    avatarPane.setMinSize(34, 34);
+                    avatarPane.setMaxSize(34, 34);
+                    if (item.isOnline) {
+                        avatarPane.setStyle("-fx-background-color: #ECFDF5; -fx-background-radius: 17px; -fx-border-color: #10B981; -fx-border-width: 2px; -fx-border-radius: 17px;");
+                    } else {
+                        avatarPane.setStyle("-fx-background-color: #F1F5F9; -fx-background-radius: 17px; -fx-border-color: #CBD5E1; -fx-border-width: 1.5px; -fx-border-radius: 17px;");
+                    }
+                    Label avLabel = new Label(item.isOnline ? "🟢" : "👤");
+                    avLabel.setStyle("-fx-font-size: 14px;");
+                    avatarPane.getChildren().add(avLabel);
+
+                    VBox info = new VBox(2);
+                    Label name = new Label(item.getEffectiveName());
+                    if (item.isOnline) {
+                        name.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #0F172A;");
+                    } else {
+                        name.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 14px; -fx-font-weight: bold; -fx-text-fill: #64748B;");
+                    }
+
+                    Label details = new Label("@" + item.username + " • " + item.rankingScore + "đ");
+                    details.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 11px; -fx-text-fill: #64748B;");
+                    info.getChildren().addAll(name, details);
+
+                    Region spacer = new Region();
+                    HBox.setHgrow(spacer, Priority.ALWAYS);
+
+                    if (item.isOnline) {
+                        Label onlineBadge = new Label("Online");
+                        onlineBadge.setStyle(
+                            "-fx-font-family: 'Patrick Hand'; -fx-font-size: 11px; -fx-font-weight: bold; " +
+                            "-fx-text-fill: #065F46; -fx-background-color: #D1FAE5; -fx-background-radius: 12px; " +
+                            "-fx-border-color: #34D399; -fx-border-radius: 12px; -fx-padding: 2 6;"
+                        );
+
+                        Button inviteBtn = new Button("✉ Mời");
+                        inviteBtn.setStyle(
+                            "-fx-font-family: 'Patrick Hand'; -fx-font-size: 13px; -fx-font-weight: bold; " +
+                            "-fx-background-color: #10B981; -fx-text-fill: white; -fx-background-radius: 6px; " +
+                            "-fx-padding: 3 10; -fx-cursor: hand;"
+                        );
+                        inviteBtn.setOnAction(e -> {
+                            sendRoomInvite(item.username);
+                            inviteBtn.setText("✔ Đã mời");
+                            inviteBtn.setStyle(
+                                "-fx-font-family: 'Patrick Hand'; -fx-font-size: 12px; " +
+                                "-fx-background-color: #E2E8F0; -fx-text-fill: #64748B; -fx-background-radius: 6px; " +
+                                "-fx-padding: 3 8;"
+                            );
+                            inviteBtn.setDisable(true);
+                        });
+                        card.getChildren().addAll(avatarPane, info, spacer, onlineBadge, inviteBtn);
+                    } else {
+                        Label offlineLbl = new Label("⚫ Ngoại tuyến");
+                        offlineLbl.setStyle(
+                            "-fx-font-family: 'Patrick Hand'; -fx-font-size: 11px; -fx-text-fill: #94A3B8; " +
+                            "-fx-background-color: #F1F5F9; -fx-background-radius: 12px; -fx-border-color: #CBD5E1; " +
+                            "-fx-border-radius: 12px; -fx-padding: 2 6;"
+                        );
+                        card.getChildren().addAll(avatarPane, info, spacer, offlineLbl);
+                    }
+
+                    setGraphic(card);
+                    setText(null);
+                }
+            }
+        });
+
+        card.getChildren().addAll(headerBox, subLbl, friendListView);
+        return card;
+    }
+
+    private VBox createInRoomChatCard() {
+        VBox card = new VBox(12);
+        card.setPadding(new Insets(16));
+        card.getStyleClass().add("speech-box-white");
+
+        VBox titleBox = new VBox(3);
+        Label chatHeader = new Label("💬 Chat nội bộ phòng #" + roomId);
+        chatHeader.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 20px; -fx-font-weight: bold; -fx-text-fill: -fx-ink;");
+
+        Label chatSub = new Label("🔒 Chỉ người trong phòng mới thấy nội dung");
+        chatSub.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 13px; -fx-text-fill: #666666;");
+        titleBox.getChildren().addAll(chatHeader, chatSub);
 
         chatListView = new ListView<>(chatMessages);
-        chatListView.setPrefHeight(340);
-        chatListView.setStyle("-fx-background-radius: 6;");
+        VBox.setVgrow(chatListView, Priority.ALWAYS);
+        chatListView.setMaxHeight(Double.MAX_VALUE);
+        chatListView.setPlaceholder(new Label("Chưa có tin nhắn trong phòng."));
 
-        HBox chatInputBox = new HBox(10);
+        HBox inputBox = new HBox(8);
         chatInput = new TextField();
-        chatInput.setPromptText("Nhập tin nhắn...");
+        chatInput.setPromptText("Nhập tin nhắn phòng... (Enter để gửi)");
+        chatInput.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 15px;");
         HBox.setHgrow(chatInput, Priority.ALWAYS);
         chatInput.setOnAction(e -> sendChatMessage());
 
-        Button sendBtn = new Button("Gửi");
-        sendBtn.setStyle("-fx-background-color: #F5B800; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 6; -fx-cursor: hand;");
+        Button sendBtn = new Button("Gửi ➔");
+        sendBtn.getStyleClass().add("pencil-button-sm");
         sendBtn.setOnAction(e -> sendChatMessage());
 
-        chatInputBox.getChildren().addAll(chatInput, sendBtn);
+        inputBox.getChildren().addAll(chatInput, sendBtn);
 
-        rightCard.getChildren().addAll(chatHeader, chatListView, chatInputBox);
-
-        contentBox.getChildren().addAll(leftCard, rightCard);
-        root.setCenter(contentBox);
-
-        scene = new Scene(root, 1050, 620);
-        return scene;
+        card.getChildren().addAll(titleBox, chatListView, inputBox);
+        return card;
     }
 
     public Scene getScene() {
         return scene;
+    }
+
+    private void copyRoomCode() {
+        try {
+            Clipboard clipboard = Clipboard.getSystemClipboard();
+            ClipboardContent content = new ClipboardContent();
+            content.putString(roomId);
+            clipboard.setContent(content);
+            DoodleDialog.showToast(app.getPrimaryStage(), "📋 Đã chép mã phòng #" + roomId + " vào bộ nhớ tạm!");
+        } catch (Exception e) {
+            DoodleDialog.info(app.getPrimaryStage(), "Mã phòng", "Mã phòng của bạn là: " + roomId);
+        }
+    }
+
+    private void requestFriendsList() {
+        if (app.getWsClient() != null && app.getWsClient().isConnected()) {
+            app.getWsClient().send(new Envelope(MessageType.FRIEND_LIST));
+        }
+    }
+
+    private void sendRoomInvite(String targetUsername) {
+        if (targetUsername == null || targetUsername.trim().isEmpty()) return;
+        Envelope env = new Envelope(MessageType.ROOM_INVITE_SEND);
+        env.put("roomId", roomId);
+        env.put("targetUsername", targetUsername);
+        app.getWsClient().send(env);
+        DoodleDialog.showToast(app.getPrimaryStage(), "✉ Đã gửi lời mời tham gia tới @" + targetUsername);
     }
 
     private void toggleReady() {
@@ -198,8 +427,10 @@ public class RoomScreen {
         if (roundsCombo.getValue() != null) {
             env.putInt("maxRounds", roundsCombo.getValue());
         }
+        env.putBoolean("requireApproval", requireApprovalCheck.isSelected());
         env.putString("language", "vi");
         app.getWsClient().send(env);
+        DoodleDialog.showToast(app.getPrimaryStage(), "⚙ Đã lưu cài đặt phòng thành công!");
     }
 
     private void sendChatMessage() {
@@ -214,14 +445,15 @@ public class RoomScreen {
 
     private void kickPlayer(String targetUsername) {
         if (!isCurrentUserHost) return;
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, "Bạn có chắc muốn kick " + targetUsername + " khỏi phòng?", ButtonType.YES, ButtonType.NO);
-        confirm.showAndWait().ifPresent(response -> {
-            if (response == ButtonType.YES) {
-                Envelope env = new Envelope(MessageType.ROOM_KICK);
-                env.put("targetUsername", targetUsername);
-                app.getWsClient().send(env);
-            }
-        });
+        DoodleDialog.confirm(app.getPrimaryStage(), "Kick người chơi",
+                "Bạn có chắc muốn kick @" + targetUsername + " khỏi phòng?",
+                "KICK NGAY", "HỦY BỎ", confirmed -> {
+                    if (confirmed) {
+                        Envelope env = new Envelope(MessageType.ROOM_KICK);
+                        env.put("targetUsername", targetUsername);
+                        app.getWsClient().send(env);
+                    }
+                });
     }
 
     public void handleMessage(Envelope env) {
@@ -234,8 +466,18 @@ public class RoomScreen {
                 case ROOM_UPDATE_SETTINGS:
                     int drawTime = env.getInt("drawTime", 60);
                     int maxRounds = env.getInt("maxRounds", 4);
-                    drawTimeCombo.setValue(drawTime);
-                    roundsCombo.setValue(maxRounds);
+                    boolean req = env.getBoolean("requireApproval", false);
+                    if (drawTimeCombo != null) drawTimeCombo.setValue(drawTime);
+                    if (roundsCombo != null) roundsCombo.setValue(maxRounds);
+                    if (requireApprovalCheck != null) requireApprovalCheck.setSelected(req);
+                    break;
+                case FRIEND_LIST:
+                    onFriendListUpdate(env);
+                    break;
+                case FRIEND_UPDATE:
+                case FRIEND_REMOVE:
+                case FRIEND_RESPONSE:
+                    requestFriendsList();
                     break;
                 case ROOM_CHAT_RECEIVE:
                 case ROOM_CHAT:
@@ -254,14 +496,45 @@ public class RoomScreen {
                     app.showGameScreen(roomId);
                     break;
                 case ROOM_DISSOLVED:
-                    Alert alert = new Alert(Alert.AlertType.INFORMATION, env.getContent() != null ? env.getContent() : "Phòng đã bị giải tán.");
-                    alert.show();
+                    DoodleDialog.info(app.getPrimaryStage(), "Phòng giải tán",
+                            env.getContent() != null ? env.getContent() : "Phòng đã bị giải tán.");
                     app.showLobbyScreen();
                     break;
                 default:
                     break;
             }
         });
+    }
+
+    private void onFriendListUpdate(Envelope env) {
+        friendList.clear();
+        if (env.getData() != null && env.getData().has("friends")) {
+            JsonNode friendsNode = env.getData().get("friends");
+            friendsNode.forEach(f -> {
+                String uName = f.has("username") ? f.get("username").asText() : "";
+                if (uName.isEmpty() || (app.getCurrentUsername() != null && uName.equalsIgnoreCase(app.getCurrentUsername()))) {
+                    return;
+                }
+                LobbyScreen.FriendEntry fe = new LobbyScreen.FriendEntry();
+                fe.username = uName;
+                fe.displayName = f.has("displayName") ? f.get("displayName").asText() : fe.username;
+                fe.avatar = f.has("avatar") ? f.get("avatar").asText() : "1";
+                fe.rankingScore = f.has("rankingScore") ? f.get("rankingScore").asInt() : 0;
+                fe.isOnline = f.has("isOnline") && f.get("isOnline").asBoolean();
+                friendList.add(fe);
+            });
+        }
+        // ƯU TIÊN SẮP XẾP BẠN BÈ ĐANG ONLINE LÊN ĐẦU
+        friendList.sort((a, b) -> {
+            if (a.isOnline != b.isOnline) {
+                return Boolean.compare(b.isOnline, a.isOnline);
+            }
+            return a.getEffectiveName().compareToIgnoreCase(b.getEffectiveName());
+        });
+        long onlineCount = friendList.stream().filter(f -> f.isOnline).count();
+        if (friendsCountLabel != null) {
+            friendsCountLabel.setText("👥 Bạn bè (" + onlineCount + " Online / " + friendList.size() + ")");
+        }
     }
 
     private void onRoomUpdate(Envelope env) {
@@ -280,6 +553,10 @@ public class RoomScreen {
             int mr = env.getInt("maxRounds", 4);
             if (roundsCombo != null) roundsCombo.setValue(mr);
         }
+        if (env.getData().has("requireApproval")) {
+            boolean req = env.getBoolean("requireApproval", false);
+            if (requireApprovalCheck != null) requireApprovalCheck.setSelected(req);
+        }
 
         int count = env.getInt("playerCount", 1);
         if (playerCountLabel != null) {
@@ -292,7 +569,6 @@ public class RoomScreen {
 
             String myUser = app.getCurrentUsername();
 
-            // Xác định vai trò chủ phòng và trạng thái sẵn sàng của tài khoản hiện tại trước
             boolean currentIsHost = false;
             boolean currentIsReady = false;
             if (myUser != null) {
@@ -338,7 +614,7 @@ public class RoomScreen {
 
                 card.getChildren().addAll(nameLbl, statusBadge);
 
-                // Nút kick người chơi (chỉ chủ phòng thấy, và không thể tự kick mình)
+                // Nút kick người chơi (chỉ chủ phòng thấy và không thể tự kick mình)
                 if (isCurrentUserHost && myUser != null && !uName.equalsIgnoreCase(myUser)) {
                     Button kickBtn = new Button("Kick");
                     kickBtn.setStyle("-fx-background-color: #ff4d4f; -fx-text-fill: white; -fx-font-size: 11px; -fx-font-weight: bold; -fx-padding: 3 8; -fx-background-radius: 4; -fx-cursor: hand;");
@@ -355,10 +631,10 @@ public class RoomScreen {
         if (readyBtn != null) {
             if (isCurrentUserReady) {
                 readyBtn.setText("Hủy sẵn sàng (✖)");
-                readyBtn.setStyle("-fx-background-color: #ff4d4f; -fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 15px; -fx-padding: 10 25; -fx-background-radius: 8; -fx-cursor: hand;");
+                readyBtn.setStyle("-fx-background-color: #ff4d4f; -fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 16px; -fx-padding: 8 20; -fx-background-radius: 8; -fx-cursor: hand;");
             } else {
                 readyBtn.setText("Sẵn sàng (✔)");
-                readyBtn.setStyle("-fx-background-color: #52c41a; -fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 15px; -fx-padding: 10 25; -fx-background-radius: 8; -fx-cursor: hand;");
+                readyBtn.setStyle("-fx-background-color: #52c41a; -fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 16px; -fx-padding: 8 20; -fx-background-radius: 8; -fx-cursor: hand;");
             }
         }
 
@@ -366,6 +642,7 @@ public class RoomScreen {
             saveSettingsBtn.setDisable(!isCurrentUserHost);
             drawTimeCombo.setDisable(!isCurrentUserHost);
             roundsCombo.setDisable(!isCurrentUserHost);
+            requireApprovalCheck.setDisable(!isCurrentUserHost);
         }
     }
 }

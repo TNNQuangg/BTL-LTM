@@ -10,12 +10,18 @@ public enum MessageType {
 
     // === Xác thực tài khoản ===
     LOGIN,
+    LOGIN_REQUEST,
     LOGIN_RESULT,
+    LOGIN_RESPONSE,
     REGISTER,
+    REGISTER_REQUEST,
+    REGISTER_RESPONSE,
     LOGOUT,
 
     // === Thông tin cá nhân ===
     UPDATE_PROFILE,
+    UPDATE_PROFILE_REQUEST,
+    UPDATE_PROFILE_RESPONSE,
     PROFILE_RESULT,
 
     // === Sảnh chờ (Lobby) ===
@@ -26,10 +32,12 @@ public enum MessageType {
 
     // === Quản lý phòng chơi ===
     ROOM_CREATE,
+    CREATE_ROOM,
     ROOM_LIST,
     ROOM_JOIN,
     JOIN_ROOM,
     ROOM_LEAVE,
+    LEAVE_ROOM,
     ROOM_UPDATE,
     ROOM_RESPONSE,
     READY,
@@ -37,6 +45,7 @@ public enum MessageType {
     ROOM_DISBANDED,
     ROOM_DISSOLVED,
     ROOM_CHAT,
+    ROOM_CHAT_SEND,
     ROOM_CHAT_RECEIVE,
     ROOM_KICK,
     ROOM_KICK_PLAYER,
@@ -48,6 +57,11 @@ public enum MessageType {
     ROOM_INVITE_NOTIFY,
     ROOM_INVITE_RESPOND,
 
+    // === Duyệt người lạ vào phòng ===
+    ROOM_JOIN_REQUEST,
+    ROOM_JOIN_APPROVAL,
+    ROOM_JOIN_PENDING,
+
     // === Luồng trò chơi ===
     MATCH_START,
     GAME_START,
@@ -57,7 +71,6 @@ public enum MessageType {
     DRAW_PHASE_START,
     DRAW_START,
     STROKE_BATCH,
-    DRAW_DATA,        // Tương thích với React Client (cùng xử lý như STROKE_BATCH)
     DRAW_SUBMIT,
     GUESS_PHASE_START,
     GUESS_START,
@@ -77,12 +90,18 @@ public enum MessageType {
 
     // === Bảng xếp hạng ===
     LEADERBOARD,
+    LEADERBOARD_REQUEST,
+    LEADERBOARD_RESPONSE,
     GUESS_RANKING_UPDATE,
 
     // === Hệ thống bạn bè ===
     FRIEND_REQUEST,
+    FRIEND_REQUEST_SEND,
     FRIEND_RESPONSE,
+    FRIEND_REQUEST_RESPOND,
     FRIEND_LIST,
+    FRIEND_LIST_REQUEST,
+    FRIEND_LIST_RESPONSE,
     FRIEND_REMOVE,
     FRIEND_UPDATE,
     FRIEND_PENDING_LIST,
@@ -90,23 +109,37 @@ public enum MessageType {
 
     // === Tìm kiếm người chơi ===
     SEARCH_PLAYER,
+    SEARCH_USER_REQUEST,
+    SEARCH_USER_RESPONSE,
 
     // === Nhắn tin riêng (Chat 1-1) ===
     CHAT_PRIVATE,
-    CHAT_HISTORY,
-    CHAT_HISTORY_RESPONSE,
+    DIRECT_MESSAGE_SEND,
     DIRECT_MESSAGE_RECEIVE,
+    CHAT_HISTORY,
+    CHAT_HISTORY_REQUEST,
+    CHAT_HISTORY_RESPONSE,
 
     // === Lịch sử trận đấu ===
     MATCH_HISTORY,
+    MATCH_HISTORY_REQUEST,
+    MATCH_HISTORY_RESPONSE,
 
     // === Hồ sơ cá nhân ===
     PROFILE,
+    PROFILE_REQUEST,
+    PROFILE_RESPONSE,
 
     // === Admin ===
+    ADMIN_GET_USERS,
     ADMIN_USERS_RESPONSE,
     ADMIN_UPDATE_SCORE,
     ADMIN_DISSOLVE_ROOM,
+    ADMIN_GET_ROOMS,
+    ADMIN_STATS,
+    ADMIN_TOPICS,
+    ADMIN_TOPIC_ADD,
+    ADMIN_TOPIC_DELETE,
 
     // === Lỗi chung ===
     ERROR

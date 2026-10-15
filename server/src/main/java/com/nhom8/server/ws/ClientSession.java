@@ -5,6 +5,7 @@ import org.springframework.web.socket.WebSocketSession;
 
 import com.nhom8.common.message.Envelope;
 import com.nhom8.server.util.JsonUtil;
+import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 
 /**
  * Lớp đóng gói phiên kết nối WebSocket với một Client cụ thể.
@@ -30,7 +31,7 @@ public class ClientSession {
     private String currentRoomId;
 
     public ClientSession(WebSocketSession session) {
-        this.session = session;
+        this.session = new ConcurrentWebSocketSessionDecorator(session, 5000, 1024 * 1024);
     }
 
     /**
@@ -98,6 +99,14 @@ public class ClientSession {
 
     public boolean isConnected() {
         return session != null && session.isOpen();
+    }
+
+    public boolean isOpen() {
+        return isConnected();
+    }
+
+    public boolean isAuthenticated() {
+        return username != null && !username.trim().isEmpty();
     }
 
     /**

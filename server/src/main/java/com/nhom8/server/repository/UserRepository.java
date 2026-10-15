@@ -20,6 +20,9 @@ public interface UserRepository extends JpaRepository<User, Integer> {
     /** Tìm người chơi theo tên đăng nhập. */
     User findByUsername(String username);
 
+    /** Tìm người chơi theo tên đăng nhập (không phân biệt chữ hoa thường). */
+    User findByUsernameIgnoreCase(String username);
+
     /** Lấy top N người chơi có điểm hạng cao nhất. */
     List<User> findTop50ByOrderByRankingScoreDesc();
 
