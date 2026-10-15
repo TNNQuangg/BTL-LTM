@@ -538,14 +538,20 @@ public class LobbyScreen {
                         chatBtn.getStyleClass().add("pencil-button-sm");
                         chatBtn.setStyle("-fx-padding: 2 8; -fx-font-size: 14px;");
                         chatBtn.setOnAction(e -> app.openPrivateChat(item.username, item.getEffectiveName()));
+                        actions.getChildren().add(chatBtn);
 
-                        Button addBtn = new Button("➕");
-                        addBtn.setTooltip(new Tooltip("Gửi kết bạn"));
-                        addBtn.getStyleClass().add("pencil-button-sm");
-                        addBtn.setStyle("-fx-padding: 2 8; -fx-font-size: 14px;");
-                        addBtn.setOnAction(e -> sendFriendRequest(item.username));
-
-                        actions.getChildren().addAll(chatBtn, addBtn);
+                        if (isFriend(item.username)) {
+                            Label friendBadge = new Label("✓ Bạn bè");
+                            friendBadge.getStyleClass().add("friend-badge");
+                            actions.getChildren().add(friendBadge);
+                        } else {
+                            Button addBtn = new Button("➕");
+                            addBtn.setTooltip(new Tooltip("Gửi kết bạn"));
+                            addBtn.getStyleClass().add("pencil-button-sm");
+                            addBtn.setStyle("-fx-padding: 2 8; -fx-font-size: 14px;");
+                            addBtn.setOnAction(e -> sendFriendRequest(item.username));
+                            actions.getChildren().add(addBtn);
+                        }
                     }
 
                     row.getChildren().addAll(statusDot, infoBox, spacer, actions);
@@ -566,6 +572,11 @@ public class LobbyScreen {
 
         box.getChildren().addAll(onlineActionBar, playerListView);
         return box;
+    }
+
+    private boolean isFriend(String username) {
+        if (username == null) return false;
+        return friendList.stream().anyMatch(friend -> username.equalsIgnoreCase(friend.username));
     }
 
     // --- TAB 3: PENDING REQUESTS ---
@@ -825,6 +836,7 @@ public class LobbyScreen {
                 if (friendCountLabel != null) {
                     friendCountLabel.setText("Danh sách bạn bè (" + onlineCount + " đang online / " + friendList.size() + " người):");
                 }
+                if (playerListView != null) playerListView.refresh();
             } else if (env.getType() == MessageType.FRIEND_PENDING_LIST) {
                 pendingList.clear();
                 if (env.getData() != null && env.getData().has("pendingRequests")) {

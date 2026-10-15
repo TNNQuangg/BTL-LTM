@@ -170,6 +170,19 @@
     -fx-padding: 4 10 4 10;
 }
 
+.friend-badge {
+    -fx-background-color: #E8F5E9;
+    -fx-text-fill: #237A3B;
+    -fx-border-color: #75B982;
+    -fx-border-width: 1;
+    -fx-background-radius: 12;
+    -fx-border-radius: 12;
+    -fx-padding: 3 9;
+    -fx-font-family: "Patrick Hand";
+    -fx-font-size: 14px;
+    -fx-font-weight: bold;
+}
+
 /* Tùy chỉnh danh sách ListView kiểu sketch */
 .list-view {
     -fx-background-color: white;
