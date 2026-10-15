@@ -10,6 +10,7 @@ import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -24,12 +25,134 @@ import javafx.stage.StageStyle;
 import javafx.util.Duration;
 
 import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 
 /**
  * Hệ thống Modal Dialog và Toast Notification phong cách Doodle Sketch
  * Thay thế hoàn toàn các Alert / TextInputDialog mặc định của JavaFX.
  */
 public class DoodleDialog {
+
+    public static void roomSetup(Stage owner, BiConsumer<String, String> callback) {
+        if (!Platform.isFxApplicationThread()) {
+            Platform.runLater(() -> roomSetup(owner, callback));
+            return;
+        }
+
+        Stage dialog = new Stage();
+        dialog.initStyle(StageStyle.TRANSPARENT);
+        if (owner != null) dialog.initOwner(owner);
+        dialog.initModality(Modality.APPLICATION_MODAL);
+
+        VBox box = new VBox(12);
+        box.getStyleClass().add("doodle-dialog-box");
+        box.setAlignment(Pos.CENTER);
+        box.setMinWidth(440);
+        box.setMaxWidth(520);
+
+        Label title = new Label("🎨 Tạo phòng mới");
+        title.setStyle("-fx-font-family: 'Amatic SC'; -fx-font-size: 34px; -fx-font-weight: bold; -fx-text-fill: -fx-ink;");
+        Label nameLabel = new Label("Tên phòng");
+        nameLabel.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 17px; -fx-font-weight: bold;");
+        TextField nameField = new TextField();
+        nameField.setPromptText("Ví dụ: Phòng của bạn");
+        Label passwordLabel = new Label("Mật khẩu phòng (bắt buộc)");
+        passwordLabel.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 17px; -fx-font-weight: bold;");
+        PasswordField passwordField = new PasswordField();
+        passwordField.setPromptText("Nhập mật khẩu từ 4 đến 32 ký tự");
+        Label hint = new Label("Phòng luôn được khóa. Chia sẻ mật khẩu này với người chơi được mời.");
+        hint.setWrapText(true);
+        hint.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 14px; -fx-text-fill: #666666;");
+        Label error = new Label();
+        error.setStyle("-fx-font-family: 'Patrick Hand'; -fx-text-fill: #C62828; -fx-font-weight: bold;");
+
+        Button cancel = new Button("HỦY BỎ");
+        cancel.getStyleClass().add("pencil-button-danger");
+        cancel.setOnAction(e -> {
+            dialog.close();
+            if (callback != null) callback.accept(null, null);
+        });
+        Button create = new Button("TẠO PHÒNG");
+        create.getStyleClass().add("pencil-button-success");
+        create.setOnAction(e -> {
+            String password = passwordField.getText().trim();
+            if (password.length() < 4 || password.length() > 32) {
+                error.setText("Mật khẩu phải từ 4 đến 32 ký tự.");
+                return;
+            }
+            dialog.close();
+            if (callback != null) callback.accept(nameField.getText().trim(), password);
+        });
+
+        HBox buttons = new HBox(14, cancel, create);
+        buttons.setAlignment(Pos.CENTER);
+        box.getChildren().addAll(title, nameLabel, nameField, passwordLabel, passwordField, hint, error, buttons);
+        StackPane root = new StackPane(box);
+        root.setPadding(new Insets(15));
+        root.setStyle("-fx-background-color: rgba(0, 0, 0, 0.4);");
+        Scene scene = new Scene(root);
+        scene.setFill(Color.TRANSPARENT);
+        MainApplication.applyTheme(scene);
+        dialog.setScene(scene);
+        dialog.setTitle("Tạo phòng");
+        dialog.showAndWait();
+    }
+
+    public static void password(Stage owner, String roomName, Consumer<String> callback) {
+        if (!Platform.isFxApplicationThread()) {
+            Platform.runLater(() -> password(owner, roomName, callback));
+            return;
+        }
+
+        Stage dialog = new Stage();
+        dialog.initStyle(StageStyle.TRANSPARENT);
+        if (owner != null) dialog.initOwner(owner);
+        dialog.initModality(Modality.APPLICATION_MODAL);
+        VBox box = new VBox(14);
+        box.getStyleClass().add("doodle-dialog-box");
+        box.setAlignment(Pos.CENTER);
+        box.setMinWidth(420);
+        Label title = new Label("🔐 Phòng có mật khẩu");
+        title.setStyle("-fx-font-family: 'Amatic SC'; -fx-font-size: 32px; -fx-font-weight: bold; -fx-text-fill: -fx-ink;");
+        Label prompt = new Label("Nhập mật khẩu để vào " + (roomName == null ? "phòng" : roomName) + ":");
+        prompt.setWrapText(true);
+        prompt.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 17px;");
+        PasswordField field = new PasswordField();
+        field.setPromptText("Mật khẩu phòng");
+        Label error = new Label();
+        error.setStyle("-fx-font-family: 'Patrick Hand'; -fx-text-fill: #C62828; -fx-font-weight: bold;");
+        Button cancel = new Button("HỦY BỎ");
+        cancel.getStyleClass().add("pencil-button-danger");
+        cancel.setOnAction(e -> {
+            dialog.close();
+            if (callback != null) callback.accept(null);
+        });
+        Button join = new Button("VÀO PHÒNG");
+        join.getStyleClass().add("pencil-button-success");
+        join.setOnAction(e -> {
+            String value = field.getText();
+            if (value == null || value.isBlank()) {
+                error.setText("Vui lòng nhập mật khẩu phòng.");
+                return;
+            }
+            dialog.close();
+            if (callback != null) callback.accept(value);
+        });
+        HBox buttons = new HBox(14, cancel, join);
+        buttons.setAlignment(Pos.CENTER);
+        box.getChildren().addAll(title, prompt, field, error, buttons);
+        StackPane root = new StackPane(box);
+        root.setPadding(new Insets(15));
+        root.setStyle("-fx-background-color: rgba(0, 0, 0, 0.4);");
+        Scene scene = new Scene(root);
+        scene.setFill(Color.TRANSPARENT);
+        MainApplication.applyTheme(scene);
+        dialog.setScene(scene);
+        dialog.setTitle("Mật khẩu phòng");
+        field.setOnAction(e -> join.fire());
+        Platform.runLater(field::requestFocus);
+        dialog.showAndWait();
+    }
 
     public static void info(Stage owner, String title, String message) {
         showCustomAlert(owner, "🎨 " + (title != null ? title : "Thông báo"), message, "ĐỒNG Ý", null);

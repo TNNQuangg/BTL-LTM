@@ -29,6 +29,9 @@ public class ChatMessage implements Serializable {
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
+    @Column(name = "is_read", nullable = false, columnDefinition = "boolean default false")
+    private boolean readStatus;
+
     public ChatMessage() {
     }
 
@@ -59,4 +62,6 @@ public class ChatMessage implements Serializable {
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+    public boolean isRead() { return readStatus; }
+    public void setRead(boolean read) { this.readStatus = read; }
 }

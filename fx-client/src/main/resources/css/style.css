@@ -183,6 +183,39 @@
     -fx-font-weight: bold;
 }
 
+.floating-inbox-button {
+    -fx-background-color: #171717;
+    -fx-text-fill: #F5C800;
+    -fx-font-size: 25px;
+    -fx-border-color: #F5C800;
+    -fx-border-width: 2;
+    -fx-background-radius: 30;
+    -fx-border-radius: 30;
+    -fx-min-width: 58;
+    -fx-min-height: 58;
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.28), 9, 0, 0, 3);
+}
+
+.floating-inbox-button:hover {
+    -fx-background-color: #F5C800;
+    -fx-text-fill: #171717;
+}
+
+.inbox-unread-badge {
+    -fx-background-color: #E53935;
+    -fx-text-fill: white;
+    -fx-font-family: "Patrick Hand";
+    -fx-font-size: 12px;
+    -fx-font-weight: bold;
+    -fx-padding: 2 6;
+    -fx-background-radius: 12;
+    -fx-border-color: white;
+    -fx-border-width: 1.5;
+    -fx-border-radius: 12;
+    -fx-translate-x: 4;
+    -fx-translate-y: -4;
+}
+
 /* Tùy chỉnh danh sách ListView kiểu sketch */
 .list-view {
     -fx-background-color: white;

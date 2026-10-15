@@ -118,6 +118,9 @@ public class PrivateChatWindow {
         stage.setTitle("💬 Nhắn tin: " + targetDisplayName + " (@" + targetUsername + ")");
 
         stage.setOnCloseRequest(e -> app.onPrivateChatClosed(targetUsername));
+        stage.focusedProperty().addListener((observable, wasFocused, isFocused) -> {
+            if (isFocused) app.markConversationRead(targetUsername);
+        });
 
         // Tải lịch sử tin nhắn
         requestHistory();
@@ -136,6 +139,10 @@ public class PrivateChatWindow {
 
     public Stage getStage() {
         return stage;
+    }
+
+    public boolean isShowing() {
+        return stage.isShowing() && stage.isFocused();
     }
 
     public String getTargetUsername() {

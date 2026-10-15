@@ -147,9 +147,6 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
             case ROOM_INVITE_RESPOND:
                 gameService.handleRoomInviteRespond(handler, envelope);
                 break;
-            case ROOM_JOIN_APPROVAL:
-                gameService.handleRoomJoinApproval(handler, envelope);
-                break;
             case CHAT_PRIVATE:
             case DIRECT_MESSAGE_SEND:
                 gameService.handleDirectMessageSend(handler, envelope);
@@ -157,6 +154,12 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
             case CHAT_HISTORY:
             case CHAT_HISTORY_REQUEST:
                 gameService.handleChatHistoryRequest(handler, envelope);
+                break;
+            case CHAT_INBOX_REQUEST:
+                gameService.handleChatInboxRequest(handler);
+                break;
+            case CHAT_MARK_READ:
+                gameService.handleChatMarkRead(handler, envelope);
                 break;
             case FRIEND_REQUEST:
             case FRIEND_REQUEST_SEND:

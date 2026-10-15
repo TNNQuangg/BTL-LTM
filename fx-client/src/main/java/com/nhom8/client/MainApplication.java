@@ -471,24 +471,19 @@ public class MainApplication extends Application {
         } else if (envelope.getType() == MessageType.ROOM_DISSOLVED) {
             DoodleDialog.info(primaryStage, "Phòng giải tán", envelope.getContent() != null ? envelope.getContent() : "Phòng đã bị giải tán.");
             showLobbyScreen();
-        } else if (envelope.getType() == MessageType.ROOM_JOIN_REQUEST) {
-            String applicantUser = envelope.getString("applicantUsername");
-            String applicantDisplay = envelope.getString("applicantDisplayName");
-            String reqRoomId = envelope.getString("roomId");
-            String name = (applicantDisplay != null && !applicantDisplay.isEmpty()) ? applicantDisplay : applicantUser;
-            DoodleDialog.confirm(primaryStage, "🔔 Duyệt người vào phòng",
-                    "Người chơi " + name + " (@" + applicantUser + ") muốn tham gia phòng #" + reqRoomId + " của bạn.\nBạn có đồng ý cho người này vào chơi không?",
-                    "CHO VÀO (DUYỆT)", "TỪ CHỐI", approved -> {
-                        Envelope approvalEnv = new Envelope(MessageType.ROOM_JOIN_APPROVAL);
-                        approvalEnv.put("roomId", reqRoomId);
-                        approvalEnv.put("targetUsername", applicantUser);
-                        approvalEnv.putBoolean("approved", approved);
-                        webSocketClient.send(approvalEnv);
+        } else if (envelope.getType() == MessageType.ROOM_PASSWORD_REQUIRED) {
+            String roomId = envelope.getString("roomId");
+            String roomName = envelope.getString("roomName");
+            String reason = envelope.getContent();
+            DoodleDialog.password(primaryStage,
+                    (roomName == null ? "phòng #" + roomId : "phòng \"" + roomName + "\"")
+                            + (reason == null ? "" : "\n" + reason), password -> {
+                        if (password == null || webSocketClient == null || !webSocketClient.isConnected()) return;
+                        Envelope join = new Envelope(MessageType.ROOM_JOIN);
+                        join.put("roomId", roomId);
+                        join.put("roomPassword", password);
+                        webSocketClient.send(join);
                     });
-            return;
-        } else if (envelope.getType() == MessageType.ROOM_JOIN_PENDING) {
-            DoodleDialog.info(primaryStage, "⏳ Chờ chủ phòng duyệt",
-                    envelope.getContent() != null ? envelope.getContent() : "Phòng này yêu cầu phê duyệt từ chủ phòng. Yêu cầu tham gia đã được gửi, vui lòng chờ!");
             return;
         } else if (envelope.getType() == MessageType.ROOM_INVITE_NOTIFY) {
             String inviter = envelope.getString("senderDisplayName");
@@ -529,6 +524,11 @@ public class MainApplication extends Application {
         }
 
         // Xử lý tin nhắn riêng 1-1 (Private Chat với bạn bè)
+        if (envelope.getType() == MessageType.CHAT_INBOX_RESPONSE) {
+            if (lobbyScreen != null) lobbyScreen.updateInbox(envelope);
+            return;
+        }
+
         if (envelope.getType() == MessageType.DIRECT_MESSAGE_RECEIVE) {
             String senderUsername = envelope.getString("senderUsername");
             String targetUsername = envelope.getString("targetUsername");
@@ -539,14 +539,9 @@ public class MainApplication extends Application {
                 PrivateChatWindow win = openChatWindows.get(chatPartner);
                 if (win != null) {
                     win.handleReceiveMessage(envelope);
+                    if (!isSelf && win.isShowing()) markConversationRead(chatPartner);
                 } else if (!isSelf) {
-                    // Nhận được tin nhắn từ bạn bè nhưng chưa mở cửa sổ chat -> tự động mở
-                    String senderDisplay = envelope.getString("senderDisplayName");
-                    openPrivateChat(chatPartner, senderDisplay != null ? senderDisplay : chatPartner);
-                    PrivateChatWindow newWin = openChatWindows.get(chatPartner);
-                    if (newWin != null) {
-                        newWin.handleReceiveMessage(envelope);
-                    }
+                    requestChatInbox();
                 }
             }
             return;
@@ -621,6 +616,19 @@ public class MainApplication extends Application {
         }
     }
 
+    public void requestChatInbox() {
+        if (webSocketClient != null && webSocketClient.isConnected()) {
+            webSocketClient.send(new Envelope(MessageType.CHAT_INBOX_REQUEST));
+        }
+    }
+
+    public void markConversationRead(String targetUsername) {
+        if (targetUsername == null || webSocketClient == null || !webSocketClient.isConnected()) return;
+        Envelope request = new Envelope(MessageType.CHAT_MARK_READ);
+        request.put("targetUsername", targetUsername);
+        webSocketClient.send(request);
+    }
+
     public void showLobbyScreen() {
         if (lobbyScreen == null) {
             lobbyScreen = new LobbyScreen(this);
@@ -635,6 +643,7 @@ public class MainApplication extends Application {
             webSocketClient.send(new Envelope(MessageType.PLAYER_LIST));
             webSocketClient.send(new Envelope(MessageType.FRIEND_LIST));
             webSocketClient.send(new Envelope(MessageType.FRIEND_PENDING_LIST));
+            requestChatInbox();
         }
     }
 

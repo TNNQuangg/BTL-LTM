@@ -36,6 +36,8 @@ public class LobbyScreen {
     private Button tabOnlineBtn;
     private Button tabPendingBtn;
     private StackPane socialContentStack;
+    private Label inboxUnreadBadge;
+    private InboxDialog inboxDialog;
 
     private Scene scene;
 
@@ -47,12 +49,14 @@ public class LobbyScreen {
         public int playerCount;
         public int maxPlayers;
         public String status;
+        public boolean hasPassword;
 
         @Override
         public String toString() {
             String stateStr = "WAITING".equals(status) ? "🟢 Đang chờ" : "🔴 Đang chơi";
             String hostName = (hostDisplayName != null && !hostDisplayName.isEmpty()) ? hostDisplayName : host;
-            return String.format("🎨 %s  [#%s]\n     👑 Chủ phòng: %s   |   👥 %d/%d người   |   %s",
+            return String.format("%s🎨 %s  [#%s]\n     👑 Chủ phòng: %s   |   👥 %d/%d người   |   %s",
+                    hasPassword ? "🔐 " : "",
                     name, id, hostName, playerCount, maxPlayers, stateStr);
         }
     }
@@ -304,7 +308,22 @@ public class LobbyScreen {
         mainContainer.getChildren().addAll(roomsCard, socialCard);
         root.setCenter(mainContainer);
 
-        scene = new Scene(root, 1100, 640);
+        StackPane lobbyRoot = new StackPane(root);
+        Button inboxButton = new Button("💬");
+        inboxButton.getStyleClass().add("floating-inbox-button");
+        inboxButton.setTooltip(new Tooltip("Mở hộp thư và xem tin nhắn chưa đọc"));
+        inboxButton.setOnAction(e -> openInbox());
+        inboxUnreadBadge = new Label();
+        inboxUnreadBadge.getStyleClass().add("inbox-unread-badge");
+        inboxUnreadBadge.setVisible(false);
+        inboxUnreadBadge.setManaged(false);
+        StackPane inboxFab = new StackPane(inboxButton, inboxUnreadBadge);
+        StackPane.setAlignment(inboxUnreadBadge, Pos.TOP_RIGHT);
+        StackPane.setAlignment(inboxFab, Pos.BOTTOM_RIGHT);
+        StackPane.setMargin(inboxFab, new Insets(0, 26, 22, 0));
+        lobbyRoot.getChildren().add(inboxFab);
+
+        scene = new Scene(lobbyRoot, 1100, 640);
         MainApplication.applyTheme(scene);
         return scene;
     }
@@ -649,6 +668,22 @@ public class LobbyScreen {
         return scene;
     }
 
+    private void openInbox() {
+        if (inboxDialog == null) inboxDialog = new InboxDialog(app, app::openPrivateChat);
+        inboxDialog.show();
+        app.requestChatInbox();
+    }
+
+    public void updateInbox(Envelope envelope) {
+        int unread = Math.max(0, envelope.getInt("unreadTotal", 0));
+        if (inboxUnreadBadge != null) {
+            inboxUnreadBadge.setText(unread > 99 ? "99+" : Integer.toString(unread));
+            inboxUnreadBadge.setVisible(unread > 0);
+            inboxUnreadBadge.setManaged(unread > 0);
+        }
+        if (inboxDialog != null) inboxDialog.update(envelope);
+    }
+
     public void updateDisplayName(String newName) {
         Platform.runLater(() -> {
             if (welcomeLabel != null && newName != null && !newName.isEmpty()) {
@@ -725,15 +760,15 @@ public class LobbyScreen {
     }
 
     private void promptCreateRoom() {
-        DoodleDialog.input(app.getPrimaryStage(), "Tạo phòng mới",
-                "Đặt tên cho phòng chơi của bạn:", "Phòng của " + app.getCurrentDisplayName(), name -> {
+        DoodleDialog.roomSetup(app.getPrimaryStage(), (name, password) -> {
                     if (name == null) return;
-                    String trimmed = (name != null) ? name.trim() : "";
+                    String trimmed = name.trim();
                     if (trimmed.isEmpty()) {
                         trimmed = "Phòng của " + app.getCurrentDisplayName();
                     }
                     Envelope env = new Envelope(MessageType.ROOM_CREATE);
                     env.put("roomName", trimmed);
+                    env.put("roomPassword", password);
                     app.getWsClient().send(env);
                 });
     }
@@ -748,9 +783,18 @@ public class LobbyScreen {
     }
 
     private void joinRoom(String roomId) {
+        sendRoomJoin(roomId, null);
+    }
+
+    public void joinRoomWithPassword(String roomId, String password) {
+        sendRoomJoin(roomId, password);
+    }
+
+    private void sendRoomJoin(String roomId, String password) {
         if (roomId == null || roomId.trim().isEmpty()) return;
         Envelope env = new Envelope(MessageType.ROOM_JOIN);
         env.put("roomId", roomId.trim());
+        if (password != null) env.put("roomPassword", password);
         app.getWsClient().send(env);
     }
 
@@ -773,6 +817,7 @@ public class LobbyScreen {
                         entry.playerCount = r.has("playerCount") ? r.get("playerCount").asInt() : 1;
                         entry.maxPlayers = r.has("maxPlayers") ? r.get("maxPlayers").asInt() : 6;
                         entry.status = r.has("status") ? r.get("status").asText() : "WAITING";
+                        entry.hasPassword = r.has("hasPassword") && r.get("hasPassword").asBoolean();
                         roomList.add(entry);
                     });
                 }

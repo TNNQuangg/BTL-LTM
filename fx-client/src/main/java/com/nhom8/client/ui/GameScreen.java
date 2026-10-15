@@ -218,6 +218,7 @@ public class GameScreen {
         chatTitleBox.getChildren().addAll(chatTitle, chatSubtitle);
 
         chatView = new ListView<>(chatMessages);
+        chatView.setCellFactory(list -> new ChatMessageCell());
         VBox.setVgrow(chatView, Priority.ALWAYS);
         chatView.setMaxHeight(Double.MAX_VALUE);
 
@@ -480,7 +481,9 @@ public class GameScreen {
                     if (sender == null) sender = env.getSender() != null ? env.getSender() : "Ẩn danh";
                     String content = env.getString("content");
                     if (content == null) content = env.getContent();
-                    chatMessages.add(sender + ": " + content);
+                    String senderUsername = env.getString("senderUsername");
+                    boolean mine = senderUsername != null && senderUsername.equalsIgnoreCase(app.getCurrentUsername());
+                    chatMessages.add((mine ? "Bạn" : sender) + ": " + content);
                     scrollToBottom();
                     break;
                 case ROOM_UPDATE:

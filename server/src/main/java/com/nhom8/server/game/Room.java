@@ -27,6 +27,7 @@ public class Room {
     private String roomId;
     private String roomName;
     private String hostUsername;
+    private final String passwordHash;
     private RoomStatus status;
     private ConcurrentHashMap<String, ClientSession> players;
     private ConcurrentHashMap<String, Boolean> readyStatus;
@@ -36,14 +37,16 @@ public class Room {
     private int maxRounds = 4;
     private int drawTime = 60;
     private String language = "vi";
-    private boolean requireApproval = false;
-    private final Set<String> invitedUsers = ConcurrentHashMap.newKeySet();
-    private final Set<String> approvedUsers = ConcurrentHashMap.newKeySet();
 
     public Room(String roomId, String roomName, ClientSession host, GameService gameService) {
+        this(roomId, roomName, host, gameService, null);
+    }
+
+    public Room(String roomId, String roomName, ClientSession host, GameService gameService, String passwordHash) {
         this.roomId = roomId;
         this.roomName = roomName;
         this.hostUsername = host.getUsername();
+        this.passwordHash = passwordHash;
         this.status = RoomStatus.WAITING;
         this.players = new ConcurrentHashMap<>();
         this.readyStatus = new ConcurrentHashMap<>();
@@ -115,6 +118,10 @@ public class Room {
     public String getRoomId() { return roomId; }
     public String getRoomName() { return roomName; }
     public String getHostUsername() { return hostUsername; }
+    public boolean hasPassword() { return passwordHash != null && !passwordHash.isBlank(); }
+    public boolean matchesPassword(String password, org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder encoder) {
+        return !hasPassword() || (password != null && encoder.matches(password, passwordHash));
+    }
     public RoomStatus getStatus() { return status; }
     public void setStatus(RoomStatus status) { this.status = status; }
     public int getPlayerCount() { return players.size(); }
@@ -131,22 +138,6 @@ public class Room {
     public void setDrawTime(int drawTime) { this.drawTime = drawTime; }
     public String getLanguage() { return language; }
     public void setLanguage(String language) { this.language = language; }
-
-    public boolean isRequireApproval() { return requireApproval; }
-    public void setRequireApproval(boolean requireApproval) { this.requireApproval = requireApproval; }
-
-    public void inviteUser(String username) {
-        if (username != null) invitedUsers.add(username.toLowerCase());
-    }
-
-    public void approveUser(String username) {
-        if (username != null) approvedUsers.add(username.toLowerCase());
-    }
-
-    public boolean isUserInvitedOrApproved(String username) {
-        if (username == null) return false;
-        return invitedUsers.contains(username.toLowerCase()) || approvedUsers.contains(username.toLowerCase());
-    }
 
     public void resetReadyStatus() {
         for (String username : readyStatus.keySet()) {

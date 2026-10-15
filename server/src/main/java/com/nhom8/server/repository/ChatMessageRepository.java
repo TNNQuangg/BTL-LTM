@@ -2,6 +2,7 @@ package com.nhom8.server.repository;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
@@ -23,4 +24,10 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Intege
            "u IN (SELECT c.sender FROM ChatMessage c WHERE c.receiver = :me) OR " +
            "u IN (SELECT c.receiver FROM ChatMessage c WHERE c.sender = :me)")
     List<User> findChattedUsers(@Param("me") User me);
+
+    long countByReceiverAndSenderAndReadStatusFalse(User receiver, User sender);
+
+    @Modifying
+    @Query("UPDATE ChatMessage c SET c.readStatus = true WHERE c.receiver = :receiver AND c.sender = :sender AND c.readStatus = false")
+    int markConversationRead(@Param("receiver") User receiver, @Param("sender") User sender);
 }

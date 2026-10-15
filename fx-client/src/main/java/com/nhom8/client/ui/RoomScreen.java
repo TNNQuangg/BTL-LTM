@@ -31,7 +31,8 @@ public class RoomScreen {
 
     private ComboBox<Integer> drawTimeCombo;
     private ComboBox<Integer> roundsCombo;
-    private CheckBox requireApprovalCheck;
+    private Label roomAccessLabel;
+    private boolean hasRoomPassword;
     private Button saveSettingsBtn;
 
     private ObservableList<String> chatMessages;
@@ -184,17 +185,15 @@ public class RoomScreen {
 
         combosBox.getChildren().addAll(drawTimeLbl, drawTimeCombo, roundsLbl, roundsCombo);
 
-        requireApprovalCheck = new CheckBox("🔒 Duyệt người lạ (Chủ phòng phê duyệt trước khi vào)");
-        requireApprovalCheck.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 15px; -fx-text-fill: -fx-ink; -fx-font-weight: bold;");
-        requireApprovalCheck.setSelected(false);
-        requireApprovalCheck.setDisable(true);
+        roomAccessLabel = new Label("🔓 Phòng công khai");
+        roomAccessLabel.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 15px; -fx-text-fill: -fx-ink; -fx-font-weight: bold;");
 
         saveSettingsBtn = new Button("💾 Lưu cài đặt phòng");
         saveSettingsBtn.getStyleClass().add("pencil-button-sm");
         saveSettingsBtn.setDisable(true);
         saveSettingsBtn.setOnAction(e -> updateRoomSettings());
 
-        HBox settingsFooter = new HBox(10, requireApprovalCheck, new Region(), saveSettingsBtn);
+        HBox settingsFooter = new HBox(10, roomAccessLabel, new Region(), saveSettingsBtn);
         HBox.setHgrow(settingsFooter.getChildren().get(1), Priority.ALWAYS);
         settingsFooter.setAlignment(Pos.CENTER_LEFT);
 
@@ -353,6 +352,7 @@ public class RoomScreen {
         titleBox.getChildren().addAll(chatHeader, chatSub);
 
         chatListView = new ListView<>(chatMessages);
+        chatListView.setCellFactory(list -> new ChatMessageCell());
         VBox.setVgrow(chatListView, Priority.ALWAYS);
         chatListView.setMaxHeight(Double.MAX_VALUE);
         chatListView.setPlaceholder(new Label("Chưa có tin nhắn trong phòng."));
@@ -427,7 +427,6 @@ public class RoomScreen {
         if (roundsCombo.getValue() != null) {
             env.putInt("maxRounds", roundsCombo.getValue());
         }
-        env.putBoolean("requireApproval", requireApprovalCheck.isSelected());
         env.putString("language", "vi");
         app.getWsClient().send(env);
         DoodleDialog.showToast(app.getPrimaryStage(), "⚙ Đã lưu cài đặt phòng thành công!");
@@ -466,10 +465,9 @@ public class RoomScreen {
                 case ROOM_UPDATE_SETTINGS:
                     int drawTime = env.getInt("drawTime", 60);
                     int maxRounds = env.getInt("maxRounds", 4);
-                    boolean req = env.getBoolean("requireApproval", false);
                     if (drawTimeCombo != null) drawTimeCombo.setValue(drawTime);
                     if (roundsCombo != null) roundsCombo.setValue(maxRounds);
-                    if (requireApprovalCheck != null) requireApprovalCheck.setSelected(req);
+                    updateRoomAccess(env.getBoolean("hasPassword", hasRoomPassword));
                     break;
                 case FRIEND_LIST:
                     onFriendListUpdate(env);
@@ -486,7 +484,9 @@ public class RoomScreen {
                     if (sender == null) sender = env.getSender() != null ? env.getSender() : "Ẩn danh";
                     String text = env.getString("content");
                     if (text == null) text = env.getContent();
-                    chatMessages.add(sender + ": " + text);
+                    String senderUsername = env.getString("senderUsername");
+                    boolean mine = senderUsername != null && senderUsername.equalsIgnoreCase(app.getCurrentUsername());
+                    chatMessages.add((mine ? "Bạn" : sender) + ": " + text);
                     if (chatListView != null && !chatMessages.isEmpty()) {
                         chatListView.scrollTo(chatMessages.size() - 1);
                     }
@@ -553,10 +553,7 @@ public class RoomScreen {
             int mr = env.getInt("maxRounds", 4);
             if (roundsCombo != null) roundsCombo.setValue(mr);
         }
-        if (env.getData().has("requireApproval")) {
-            boolean req = env.getBoolean("requireApproval", false);
-            if (requireApprovalCheck != null) requireApprovalCheck.setSelected(req);
-        }
+        if (env.getData().has("hasPassword")) updateRoomAccess(env.getBoolean("hasPassword", false));
 
         int count = env.getInt("playerCount", 1);
         if (playerCountLabel != null) {
@@ -627,6 +624,15 @@ public class RoomScreen {
         }
     }
 
+    private void updateRoomAccess(boolean hasPassword) {
+        hasRoomPassword = hasPassword;
+        if (roomAccessLabel != null) {
+            roomAccessLabel.setText(hasPassword ? "🔐 Có mật khẩu phòng" : "🔓 Phòng công khai");
+            roomAccessLabel.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 15px; -fx-font-weight: bold; -fx-text-fill: "
+                    + (hasPassword ? "#237A3B" : "#555555") + ";");
+        }
+    }
+
     private void updateMyControls() {
         if (readyBtn != null) {
             if (isCurrentUserReady) {
@@ -642,7 +648,6 @@ public class RoomScreen {
             saveSettingsBtn.setDisable(!isCurrentUserHost);
             drawTimeCombo.setDisable(!isCurrentUserHost);
             roundsCombo.setDisable(!isCurrentUserHost);
-            requireApprovalCheck.setDisable(!isCurrentUserHost);
         }
     }
 }

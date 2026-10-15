@@ -40,6 +40,7 @@ public enum MessageType {
     LEAVE_ROOM,
     ROOM_UPDATE,
     ROOM_RESPONSE,
+    ROOM_PASSWORD_REQUIRED,
     READY,
     HOST_CHANGED,
     ROOM_DISBANDED,
@@ -119,6 +120,9 @@ public enum MessageType {
     CHAT_HISTORY,
     CHAT_HISTORY_REQUEST,
     CHAT_HISTORY_RESPONSE,
+    CHAT_INBOX_REQUEST,
+    CHAT_INBOX_RESPONSE,
+    CHAT_MARK_READ,
 
     // === Lịch sử trận đấu ===
     MATCH_HISTORY,

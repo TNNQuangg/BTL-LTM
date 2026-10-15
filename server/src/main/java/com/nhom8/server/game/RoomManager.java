@@ -26,13 +26,17 @@ public class RoomManager {
     }
 
     public synchronized Room createRoom(ClientSession host, String roomName) {
+        return createRoom(host, roomName, null);
+    }
+
+    public synchronized Room createRoom(ClientSession host, String roomName, String passwordHash) {
         String roomId;
         Random random = new Random();
         do {
             roomId = String.format("%06d", random.nextInt(1000000));
         } while (rooms.containsKey(roomId));
 
-        Room room = new Room(roomId, roomName, host, gameService);
+        Room room = new Room(roomId, roomName, host, gameService, passwordHash);
         rooms.put(roomId, room);
         return room;
     }
@@ -63,7 +67,7 @@ public class RoomManager {
             info.put("playerCount", room.getPlayerCount());
             info.put("maxPlayers", Room.MAX_PLAYERS);
             info.put("status", room.getStatus().name());
-            info.put("requireApproval", room.isRequireApproval());
+            info.put("hasPassword", room.hasPassword());
             list.add(info);
         }
         return list;
