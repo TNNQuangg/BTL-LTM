@@ -40,11 +40,9 @@ public class AdminScreen {
         title.setStyle("-fx-font-family: 'Amatic SC'; -fx-font-size: 38px; -fx-font-weight: bold;");
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-        Button refresh = new Button("Làm mới");
-        refresh.setOnAction(e -> refresh());
         Button back = new Button("Về sảnh");
         back.setOnAction(e -> app.showLobbyScreen());
-        header.getChildren().addAll(title, spacer, refresh, back);
+        header.getChildren().addAll(title, spacer, back);
         root.setTop(header);
 
         TabPane tabs = new TabPane();
@@ -130,7 +128,7 @@ public class AdminScreen {
                 topics.getItems().clear();
                 data.path("topics").forEach(t -> topics.getItems().add(t.asText()));
             }
-            case ADMIN_DISSOLVE_ROOM -> { refresh(); status.setText(env.getContent()); }
+            case ADMIN_DISSOLVE_ROOM -> status.setText(env.getContent());
             case ADMIN_TOPIC_ADD, ADMIN_TOPIC_DELETE -> status.setText(env.getContent());
             default -> {}
         }

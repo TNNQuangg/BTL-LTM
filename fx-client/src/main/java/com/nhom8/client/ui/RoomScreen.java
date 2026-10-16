@@ -5,6 +5,7 @@ import com.nhom8.client.MainApplication;
 import com.nhom8.common.message.Envelope;
 import com.nhom8.common.message.MessageType;
 import javafx.application.Platform;
+import javafx.animation.PauseTransition;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
@@ -14,6 +15,7 @@ import javafx.scene.control.*;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.*;
+import javafx.util.Duration;
 
 public class RoomScreen {
     private final MainApplication app;
@@ -42,6 +44,11 @@ public class RoomScreen {
     private ObservableList<LobbyScreen.FriendEntry> friendList;
     private ListView<LobbyScreen.FriendEntry> friendListView;
     private Label friendsCountLabel;
+    private final ObservableList<LobbyScreen.PendingRequestEntry> pendingFriends = FXCollections.observableArrayList();
+    private Tab pendingFriendsTab;
+    private Tab chatTab;
+    private TabPane socialTabs;
+    private int unreadRoomMessages;
 
     private Scene scene;
 
@@ -97,7 +104,7 @@ public class RoomScreen {
         topBar.getChildren().addAll(leaveBtn, titleLabel, copyBox, spacer, playerCountLabel);
         root.setTop(topBar);
 
-        // --- CENTER 3-COLUMN FLEXIBLE LAYOUT ---
+        // Room controls on the left, three social tabs on the right.
         HBox contentBox = new HBox(15);
         contentBox.setPadding(new Insets(15));
         contentBox.setFillHeight(true);
@@ -109,19 +116,27 @@ public class RoomScreen {
         playersCard.setMinWidth(340);
         playersCard.setMaxWidth(Double.MAX_VALUE);
 
-        // COLUMN 2: INVITE FRIENDS IN ROOM (Danh sách bạn bè mời chơi)
+        VBox pendingCard = createPendingFriendsCard();
         VBox friendsCard = createFriendsInviteCard();
-        HBox.setHgrow(friendsCard, Priority.ALWAYS);
-        friendsCard.setMinWidth(280);
-        friendsCard.setMaxWidth(Double.MAX_VALUE);
-
-        // COLUMN 3: IN-ROOM CHAT (Chat nội bộ phòng)
         VBox chatCard = createInRoomChatCard();
-        HBox.setHgrow(chatCard, Priority.ALWAYS);
-        chatCard.setMinWidth(320);
-        chatCard.setMaxWidth(Double.MAX_VALUE);
+        pendingFriendsTab = new Tab("🔔 Lời mời kết bạn (0)", pendingCard);
+        Tab friendsTab = new Tab("👥 Danh sách bạn", friendsCard);
+        chatTab = new Tab("💬 Cuộc trò chuyện", chatCard);
+        socialTabs = new TabPane(pendingFriendsTab, friendsTab, chatTab);
+        socialTabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        socialTabs.getStyleClass().add("room-social-tabs");
+        socialTabs.getSelectionModel().select(chatTab);
+        socialTabs.getSelectionModel().selectedItemProperty().addListener((obs, oldTab, newTab) -> {
+            if (newTab == chatTab) {
+                unreadRoomMessages = 0;
+                chatTab.setText("💬 Cuộc trò chuyện");
+            }
+        });
+        HBox.setHgrow(socialTabs, Priority.ALWAYS);
+        socialTabs.setMinWidth(560);
+        socialTabs.setMaxWidth(Double.MAX_VALUE);
 
-        contentBox.getChildren().addAll(playersCard, friendsCard, chatCard);
+        contentBox.getChildren().addAll(playersCard, socialTabs);
         root.setCenter(contentBox);
 
         scene = new Scene(root, 1180, 680);
@@ -129,6 +144,7 @@ public class RoomScreen {
 
         // Yêu cầu lấy danh sách bạn bè để hiển thị trong phòng
         requestFriendsList();
+        requestPendingFriendsList();
 
         return scene;
     }
@@ -201,6 +217,55 @@ public class RoomScreen {
         return card;
     }
 
+    private VBox createPendingFriendsCard() {
+        VBox card = new VBox(12);
+        card.setPadding(new Insets(16));
+        card.getStyleClass().add("speech-box-white");
+
+        Label title = new Label("🔔 Lời mời kết bạn");
+        title.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 20px; -fx-font-weight: bold; -fx-text-fill: -fx-ink;");
+        Label hint = new Label("Chấp nhận hoặc từ chối ngay trong phòng chờ.");
+        hint.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 13px; -fx-text-fill: #666666;");
+
+        ListView<LobbyScreen.PendingRequestEntry> requests = new ListView<>(pendingFriends);
+        requests.setPlaceholder(new Label("Bạn chưa có lời mời kết bạn nào."));
+        VBox.setVgrow(requests, Priority.ALWAYS);
+        requests.setCellFactory(list -> new ListCell<>() {
+            @Override protected void updateItem(LobbyScreen.PendingRequestEntry item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) { setGraphic(null); setText(null); return; }
+
+                Label name = new Label(item.getEffectiveName());
+                name.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 17px; -fx-font-weight: bold;");
+                Label details = new Label("@" + item.username + " · " + item.rankingScore + " điểm");
+                details.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 12px; -fx-text-fill: #64748B;");
+                VBox person = new VBox(2, name, details);
+                HBox.setHgrow(person, Priority.ALWAYS);
+
+                Button accept = new Button("✓ Đồng ý");
+                accept.setStyle("-fx-background-color: #10B981; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
+                Button decline = new Button("Từ chối");
+                decline.getStyleClass().add("pencil-button-sm");
+                accept.setOnAction(e -> {
+                    accept.setDisable(true); decline.setDisable(true);
+                    respondFriendRequest(item.username, true);
+                });
+                decline.setOnAction(e -> {
+                    accept.setDisable(true); decline.setDisable(true);
+                    respondFriendRequest(item.username, false);
+                });
+                HBox row = new HBox(10, person, accept, decline);
+                row.setAlignment(Pos.CENTER_LEFT);
+                row.setPadding(new Insets(8));
+                setGraphic(row);
+                setText(null);
+            }
+        });
+
+        card.getChildren().addAll(title, hint, requests);
+        return card;
+    }
+
     private VBox createFriendsInviteCard() {
         VBox card = new VBox(12);
         card.setPadding(new Insets(16));
@@ -215,12 +280,7 @@ public class RoomScreen {
         Region sp = new Region();
         HBox.setHgrow(sp, Priority.ALWAYS);
 
-        Button refreshBtn = new Button("🔄");
-        refreshBtn.getStyleClass().add("pencil-button-sm");
-        refreshBtn.setStyle("-fx-padding: 2 8; -fx-font-size: 14px;");
-        refreshBtn.setOnAction(e -> requestFriendsList());
-
-        headerBox.getChildren().addAll(friendsCountLabel, sp, refreshBtn);
+        headerBox.getChildren().addAll(friendsCountLabel, sp);
 
         Label subLbl = new Label("Mời bạn bè đang trực tuyến tham gia ngay vào phòng này");
         subLbl.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 13px; -fx-text-fill: #666666;");
@@ -316,6 +376,12 @@ public class RoomScreen {
                                 "-fx-padding: 3 8;"
                             );
                             inviteBtn.setDisable(true);
+                            PauseTransition cooldown = new PauseTransition(Duration.seconds(4));
+                            cooldown.setOnFinished(done -> {
+                                inviteBtn.setText("✉ Mời lại");
+                                inviteBtn.setDisable(false);
+                            });
+                            cooldown.play();
                         });
                         card.getChildren().addAll(avatarPane, info, spacer, onlineBadge, inviteBtn);
                     } else {
@@ -396,6 +462,20 @@ public class RoomScreen {
         }
     }
 
+    private void requestPendingFriendsList() {
+        if (app.getWsClient() != null && app.getWsClient().isConnected()) {
+            app.getWsClient().send(new Envelope(MessageType.FRIEND_PENDING_LIST));
+        }
+    }
+
+    private void respondFriendRequest(String senderUsername, boolean accept) {
+        if (app.getWsClient() == null || !app.getWsClient().isConnected()) return;
+        Envelope response = new Envelope(MessageType.FRIEND_RESPONSE);
+        response.putString("senderUsername", senderUsername);
+        response.putBoolean("accept", accept);
+        app.getWsClient().send(response);
+    }
+
     private void sendRoomInvite(String targetUsername) {
         if (targetUsername == null || targetUsername.trim().isEmpty()) return;
         Envelope env = new Envelope(MessageType.ROOM_INVITE_SEND);
@@ -472,10 +552,20 @@ public class RoomScreen {
                 case FRIEND_LIST:
                     onFriendListUpdate(env);
                     break;
+                case FRIEND_PENDING_LIST:
+                    onPendingFriendsUpdate(env);
+                    break;
+                case FRIEND_REQUEST_NOTIFY:
+                    requestPendingFriendsList();
+                    break;
                 case FRIEND_UPDATE:
                 case FRIEND_REMOVE:
                 case FRIEND_RESPONSE:
                     requestFriendsList();
+                    requestPendingFriendsList();
+                    if (!env.isSuccess() && env.getContent() != null) {
+                        DoodleDialog.showToast(app.getPrimaryStage(), env.getContent());
+                    }
                     break;
                 case ROOM_CHAT_RECEIVE:
                 case ROOM_CHAT:
@@ -487,6 +577,10 @@ public class RoomScreen {
                     String senderUsername = env.getString("senderUsername");
                     boolean mine = senderUsername != null && senderUsername.equalsIgnoreCase(app.getCurrentUsername());
                     chatMessages.add((mine ? "Bạn" : sender) + ": " + text);
+                    if (socialTabs != null && socialTabs.getSelectionModel().getSelectedItem() != chatTab) {
+                        unreadRoomMessages++;
+                        chatTab.setText("💬 Cuộc trò chuyện (" + unreadRoomMessages + ")");
+                    }
                     if (chatListView != null && !chatMessages.isEmpty()) {
                         chatListView.scrollTo(chatMessages.size() - 1);
                     }
@@ -504,6 +598,26 @@ public class RoomScreen {
                     break;
             }
         });
+    }
+
+    private void onPendingFriendsUpdate(Envelope env) {
+        if (!env.isSuccess()) {
+            if (env.getContent() != null) DoodleDialog.showToast(app.getPrimaryStage(), env.getContent());
+            return;
+        }
+        pendingFriends.clear();
+        JsonNode requests = env.getData() == null ? null : env.getData().get("pendingRequests");
+        if (requests != null) requests.forEach(node -> {
+            LobbyScreen.PendingRequestEntry entry = new LobbyScreen.PendingRequestEntry();
+            entry.username = node.path("username").asText("");
+            entry.displayName = node.path("displayName").asText(entry.username);
+            entry.rankingScore = node.path("rankingScore").asInt(0);
+            entry.avatar = node.path("avatar").asText("1");
+            if (!entry.username.isBlank()) pendingFriends.add(entry);
+        });
+        if (pendingFriendsTab != null) {
+            pendingFriendsTab.setText("🔔 Lời mời kết bạn (" + pendingFriends.size() + ")");
+        }
     }
 
     private void onFriendListUpdate(Envelope env) {

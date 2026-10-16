@@ -14,8 +14,7 @@ import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 
 /**
- * Cửa sổ nhắn tin riêng 1-1 với bạn bè ở sảnh chờ (Private Chat).
- * Phong cách nét vẽ tay Sketch Doodle chuẩn mực của game.
+ * Một khung hội thoại nhúng trong hộp thư hai cột.
  * Hỗ trợ:
  * - Tự động tải lịch sử chat từ máy chủ
  * - Nhắn tin thời gian thực qua WebSocket
@@ -26,8 +25,6 @@ public class PrivateChatWindow {
     private final MainApplication app;
     private final String targetUsername;
     private final String targetDisplayName;
-    private ModalOverlay overlay;
-
     private VBox messageContainer;
     private ScrollPane scrollPane;
     private TextField inputField;
@@ -68,18 +65,7 @@ public class PrivateChatWindow {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        Button refreshBtn = new Button("🔄");
-        refreshBtn.setTooltip(new Tooltip("Tải lại lịch sử tin nhắn"));
-        refreshBtn.getStyleClass().add("pencil-button-sm");
-        refreshBtn.setStyle("-fx-padding: 2 10; -fx-font-size: 16px;");
-        refreshBtn.setOnAction(e -> requestHistory());
-
-        Button closeBtn = new Button("✕");
-        closeBtn.getStyleClass().add("modal-close-button");
-        closeBtn.setTooltip(new Tooltip("Đóng cuộc trò chuyện (Esc)"));
-        closeBtn.setOnAction(e -> close());
-
-        topBar.getChildren().addAll(avatarLbl, titleBox, spacer, refreshBtn, closeBtn);
+        topBar.getChildren().addAll(avatarLbl, titleBox, spacer);
         root.setTop(topBar);
 
         // --- CENTER: MESSAGES CONTAINER IN SCROLL PANE ---
@@ -116,37 +102,18 @@ public class PrivateChatWindow {
         inputBar.getChildren().addAll(inputField, sendBtn);
         root.setBottom(inputBar);
 
-        // Tải lịch sử tin nhắn
-        requestHistory();
     }
 
-    public void show() {
-        if (overlay == null || !overlay.isShowing()) {
-            overlay = ModalOverlay.show(app.getPrimaryStage(), contentRoot, 520, 580,
-                    () -> app.onPrivateChatClosed(targetUsername));
-            app.markConversationRead(targetUsername);
-        } else {
-            overlay.bringToFront();
-        }
+    public BorderPane getView() {
+        return contentRoot;
+    }
+
+    public String getTargetDisplayName() {
+        return targetDisplayName;
+    }
+
+    public void focusInput() {
         Platform.runLater(() -> inputField.requestFocus());
-    }
-
-    public void toFront() {
-        if (overlay != null) overlay.bringToFront();
-        Platform.runLater(() -> inputField.requestFocus());
-    }
-
-    public void close() {
-        if (overlay != null) overlay.close();
-        else app.onPrivateChatClosed(targetUsername);
-    }
-
-    public boolean isShowing() {
-        return overlay != null && overlay.isShowing();
-    }
-
-    public String getTargetUsername() {
-        return targetUsername;
     }
 
     public void requestHistory() {
@@ -190,8 +157,6 @@ public class PrivateChatWindow {
     public void handleHistoryResponse(Envelope env) {
         Platform.runLater(() -> {
             messageContainer.getChildren().clear();
-            addSystemMessage("📜 Đã tải lịch sử trò chuyện với " + targetDisplayName);
-
             if (env.getData() != null && env.getData().has("history")) {
                 JsonNode historyNode = env.getData().get("history");
                 if (historyNode.isArray()) {
@@ -205,9 +170,10 @@ public class PrivateChatWindow {
                 }
             }
 
-            if (messageContainer.getChildren().size() <= 1) {
-                addSystemMessage("Chưa có tin nhắn nào. Hãy gửi lời chào đầu tiên! 👋");
+            if (messageContainer.getChildren().isEmpty()) {
+                addSystemMessage("Chưa có tin nhắn. Hãy gửi lời chào đầu tiên!");
             }
+            Platform.runLater(() -> inputField.requestFocus());
         });
     }
 

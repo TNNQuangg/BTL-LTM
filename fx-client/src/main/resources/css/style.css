@@ -1,5 +1,5 @@
 /* =========================================================
-   Scribble It! - Nhóm 8
+   Vẽ Hình Đoán Ý — Nhóm 8
    Hand-drawn Sketch / Cartoon Doodle Style Sheet
    ========================================================= */
 
@@ -26,6 +26,26 @@
 .label {
     -fx-font-family: "Patrick Hand";
     -fx-text-fill: -fx-ink;
+}
+
+.titled-pane {
+    -fx-text-fill: #34312A;
+    -fx-font-family: "Patrick Hand";
+    -fx-font-size: 15px;
+}
+
+.titled-pane > .title {
+    -fx-background-color: #F6F1E5;
+    -fx-background-radius: 8;
+    -fx-border-color: #D8D0BE;
+    -fx-border-radius: 8;
+    -fx-padding: 7 10;
+}
+
+.titled-pane > .content {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-padding: 10 4 2 4;
 }
 
 .title-label {
@@ -393,4 +413,33 @@
     -fx-border-radius: 20;
     -fx-padding: 8 22;
     -fx-effect: dropshadow(three-pass-box, rgba(0, 0, 0, 0.4), 10, 0, 0, 4);
+}
+
+/* Ba tab xã hội trong phòng chờ */
+.room-social-tabs {
+    -fx-font-family: "Patrick Hand";
+    -fx-font-size: 16px;
+    -fx-background-color: transparent;
+}
+
+.room-social-tabs .tab-header-area .tab-header-background {
+    -fx-background-color: transparent;
+}
+
+.room-social-tabs .tab {
+    -fx-background-color: #FFFDF0;
+    -fx-border-color: -fx-ink;
+    -fx-border-width: 2;
+    -fx-background-radius: 8 8 0 0;
+    -fx-border-radius: 8 8 0 0;
+    -fx-padding: 6 12;
+    -fx-cursor: hand;
+}
+
+.room-social-tabs .tab:selected {
+    -fx-background-color: #F5C800;
+}
+
+.room-social-tabs .tab-content-area {
+    -fx-background-color: transparent;
 }

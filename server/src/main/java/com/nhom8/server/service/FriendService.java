@@ -103,6 +103,20 @@ public class FriendService {
         }
     }
 
+    public void cancelFriendRequest(String myUsername, String targetUsername) {
+        User me = userRepository.findByUsernameIgnoreCase(myUsername);
+        User target = userRepository.findByUsernameIgnoreCase(targetUsername);
+        if (me == null || target == null) throw new IllegalArgumentException("Không tìm thấy người chơi.");
+        Friendship friendship = friendshipRepository.findByUsers(me, target);
+        if (friendship == null || friendship.getStatus() != Friendship.FriendshipStatus.PENDING
+                || !friendship.getSender().getUserId().equals(me.getUserId())) {
+            throw new IllegalArgumentException("Lời mời không còn ở trạng thái chờ hoặc không phải do bạn gửi.");
+        }
+        friendship.setStatus(Friendship.FriendshipStatus.REJECTED);
+        friendshipRepository.save(friendship);
+        gameService.notifyFriendRequestCancelled(target, me);
+    }
+
     public List<Map<String, Object>> getFriendList(String username) {
         User user = userRepository.findByUsername(username);
         if (user == null) user = userRepository.findByUsernameIgnoreCase(username);

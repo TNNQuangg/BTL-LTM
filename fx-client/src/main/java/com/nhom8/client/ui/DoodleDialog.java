@@ -53,11 +53,11 @@ public class DoodleDialog {
         nameLabel.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 17px; -fx-font-weight: bold;");
         TextField nameField = new TextField();
         nameField.setPromptText("Ví dụ: Phòng của bạn");
-        Label passwordLabel = new Label("Mật khẩu phòng (bắt buộc)");
+        Label passwordLabel = new Label("Mật khẩu phòng (không bắt buộc)");
         passwordLabel.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 17px; -fx-font-weight: bold;");
         PasswordField passwordField = new PasswordField();
-        passwordField.setPromptText("Nhập mật khẩu từ 4 đến 32 ký tự");
-        Label hint = new Label("Phòng luôn được khóa. Chia sẻ mật khẩu này với người chơi được mời.");
+        passwordField.setPromptText("Để trống nếu không muốn đặt mật khẩu");
+        Label hint = new Label("Bạn có thể để trống mật khẩu. Người được mời vào phòng sẽ vào trực tiếp.");
         hint.setWrapText(true);
         hint.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 14px; -fx-text-fill: #666666;");
         Label error = new Label();
@@ -72,8 +72,8 @@ public class DoodleDialog {
         create.getStyleClass().add("pencil-button-success");
         create.setOnAction(e -> {
             String password = passwordField.getText().trim();
-            if (password.length() < 4 || password.length() > 32) {
-                error.setText("Mật khẩu phải từ 4 đến 32 ký tự.");
+            if (!password.isEmpty() && (password.length() < 4 || password.length() > 32)) {
+                error.setText("Mật khẩu nếu đặt phải từ 4 đến 32 ký tự.");
                 return;
             }
             String roomName = nameField.getText().trim();

@@ -301,14 +301,7 @@ public class ProfileDialog {
         Label histTitle = new Label("Các trận đấu gần đây:");
         histTitle.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: -fx-ink;");
 
-        Region sp = new Region();
-        HBox.setHgrow(sp, Priority.ALWAYS);
-
-        Button refreshHistBtn = new Button("🔄 Làm mới");
-        refreshHistBtn.getStyleClass().add("pencil-button-sm");
-        refreshHistBtn.setOnAction(e -> requestMatchHistory());
-
-        actionBar.getChildren().addAll(histTitle, sp, refreshHistBtn);
+        actionBar.getChildren().add(histTitle);
 
         historyListView = new ListView<>(matchHistoryList);
         VBox.setVgrow(historyListView, Priority.ALWAYS);

@@ -20,15 +20,12 @@ import com.nhom8.client.ui.DoodleDialog;
 import com.nhom8.client.ui.AdminScreen;
 import com.nhom8.client.ui.GameScreen;
 import com.nhom8.client.ui.LobbyScreen;
-import com.nhom8.client.ui.PrivateChatWindow;
 import com.nhom8.client.ui.ProfileDialog;
 import com.nhom8.client.ui.ClickSound;
 import com.nhom8.client.ws.GameWebSocketClient;
 import com.nhom8.common.message.Envelope;
 import com.nhom8.common.message.MessageType;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class MainApplication extends Application {
 
@@ -43,13 +40,12 @@ public class MainApplication extends Application {
     private String lastRegisteredPassword = "";
     private Envelope lastRoomUpdate;
 
-    private final Map<String, PrivateChatWindow> openChatWindows = new ConcurrentHashMap<>();
     private ProfileDialog profileDialog;
 
     @Override
     public void start(Stage primaryStage) {
         this.primaryStage = primaryStage;
-        primaryStage.setTitle("Scribble It! - Nhóm 8");
+        primaryStage.setTitle("Vẽ Hình Đoán Ý — Nhóm 8");
         primaryStage.setMinWidth(1000);
         primaryStage.setMinHeight(650);
         loadCustomFonts();
@@ -74,14 +70,14 @@ public class MainApplication extends Application {
 
     public static void applyTheme(Scene scene) {
         if (scene == null) return;
-        if (!Boolean.TRUE.equals(scene.getProperties().get("scribble.clickSoundInstalled"))) {
+        if (!Boolean.TRUE.equals(scene.getProperties().get("veHinh.clickSoundInstalled"))) {
             scene.addEventFilter(MouseEvent.MOUSE_PRESSED, event -> {
                 if (event.getButton() != MouseButton.PRIMARY) return;
                 Node node = event.getTarget() instanceof Node target ? target : null;
                 while (node != null && !(node instanceof ButtonBase)) node = node.getParent();
                 if (node instanceof ButtonBase control && !control.isDisabled()) ClickSound.play();
             });
-            scene.getProperties().put("scribble.clickSoundInstalled", true);
+            scene.getProperties().put("veHinh.clickSoundInstalled", true);
         }
         try {
             java.net.URL cssUrl = MainApplication.class.getResource("/css/style.css");
@@ -109,10 +105,10 @@ public class MainApplication extends Application {
         root.setPadding(new Insets(30));
 
         // Game Brand Title (Áp dụng .title-label theo phong cách Amatic SC)
-        Label titleLabel = new Label("SCRIBBLE IT!");
+        Label titleLabel = new Label("VẼ HÌNH ĐOÁN Ý");
         titleLabel.getStyleClass().add("title-label");
 
-        Label subtitleLabel = new Label("🎨 Trò chơi Vẽ Hình Đoán Ý trực tuyến (Nhóm 8)");
+        Label subtitleLabel = new Label("Trò chơi vẽ và đoán trực tuyến · Nhóm 8");
         subtitleLabel.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 19px; -fx-text-fill: -fx-ink; -fx-font-weight: bold;");
 
         // Card Container (Áp dụng speech-box-white viền mực vẽ tay)
@@ -137,10 +133,15 @@ public class MainApplication extends Application {
         statusLabel.setWrapText(true);
         statusLabel.setAlignment(Pos.CENTER);
 
-        Label serverLabel = new Label("Máy chủ (IP hoặc tên miền):");
+        Label serverLabel = new Label("Địa chỉ máy chủ");
         TextField serverField = new TextField(serverAddressInput);
-        serverField.setPromptText("Ví dụ: 192.168.1.180:8080");
-        serverField.setTooltip(new Tooltip("Cùng mạng Wi-Fi: dùng IP của máy chạy server. Có thể nhập ws:// hoặc wss:// đầy đủ."));
+        serverField.setPromptText("localhost:8080");
+        serverField.setTooltip(new Tooltip("Cùng mạng Wi-Fi: nhập IP của máy đang chạy server."));
+        TitledPane serverSettings = new TitledPane("Cài đặt kết nối", new VBox(6, serverLabel, serverField));
+        serverSettings.setExpanded(false);
+        serverSettings.setAnimated(false);
+        serverSettings.setCollapsible(true);
+        serverSettings.setMaxWidth(Double.MAX_VALUE);
 
         // --- Form Đăng nhập ---
         VBox loginForm = new VBox(10);
@@ -155,6 +156,7 @@ public class MainApplication extends Application {
         loginPassLbl.setStyle("-fx-font-weight: bold; -fx-text-fill: -fx-ink; -fx-font-size: 16px; -fx-font-family: 'Patrick Hand';");
         PasswordField loginPassField = new PasswordField();
         loginPassField.setPromptText("Mật khẩu");
+        loginUserField.setOnAction(e -> loginPassField.requestFocus());
 
         // Nút Đăng nhập cây bút chì (.pencil-button)
         loginBtn = new Button("ĐĂNG NHẬP ➔");
@@ -308,13 +310,14 @@ public class MainApplication extends Application {
             connectAndRegister(user, pass, disp.isEmpty() ? user : disp);
         });
 
-        card.getChildren().addAll(serverLabel, serverField, tabBox, formContainer, statusLabel);
+        card.getChildren().addAll(serverSettings, tabBox, formContainer, statusLabel);
         root.getChildren().addAll(titleLabel, subtitleLabel, card);
 
         Scene scene = new Scene(root, 800, 600);
         applyTheme(scene);
         primaryStage.setScene(scene);
         primaryStage.show();
+        Platform.runLater(loginUserField::requestFocus);
     }
 
     private static String normalizeServerUrl(String input) {
@@ -486,15 +489,15 @@ public class MainApplication extends Application {
                     });
             return;
         } else if (envelope.getType() == MessageType.ROOM_INVITE_NOTIFY) {
-            String inviter = envelope.getString("senderDisplayName");
-            if (inviter == null) inviter = envelope.getString("senderUsername");
+            String inviter = envelope.getString("inviterUsername");
             String rId = envelope.getString("roomId");
             DoodleDialog.confirm(primaryStage, "💌 Lời mời chơi game",
                     "Người bạn " + (inviter != null ? inviter : "bạn bè") + " vừa mời bạn vào phòng #" + rId + "!\nBạn có muốn tham gia ngay không?",
                     "THAM GIA NGAY", "ĐỂ SAU", yes -> {
-                        if (yes && rId != null && webSocketClient != null) {
-                            Envelope joinEnv = new Envelope(MessageType.ROOM_JOIN);
+                        if (rId != null && webSocketClient != null) {
+                            Envelope joinEnv = new Envelope(MessageType.ROOM_INVITE_RESPOND);
                             joinEnv.put("roomId", rId);
+                            joinEnv.putBoolean("accept", yes);
                             webSocketClient.send(joinEnv);
                         }
                     });
@@ -536,13 +539,8 @@ public class MainApplication extends Application {
             String chatPartner = isSelf ? targetUsername : senderUsername;
 
             if (chatPartner != null && !chatPartner.isEmpty()) {
-                PrivateChatWindow win = openChatWindows.get(chatPartner);
-                if (win != null) {
-                    win.handleReceiveMessage(envelope);
-                    if (!isSelf && win.isShowing()) markConversationRead(chatPartner);
-                } else if (!isSelf) {
-                    requestChatInbox();
-                }
+                if (lobbyScreen != null) lobbyScreen.handleDirectMessage(envelope);
+                else if (!isSelf) requestChatInbox();
             }
             return;
         }
@@ -550,15 +548,13 @@ public class MainApplication extends Application {
         if (envelope.getType() == MessageType.CHAT_HISTORY_RESPONSE) {
             String targetUser = envelope.getString("targetUsername");
             if (targetUser != null && !targetUser.isEmpty()) {
-                PrivateChatWindow win = openChatWindows.get(targetUser);
-                if (win != null) {
-                    win.handleHistoryResponse(envelope);
-                }
+                if (lobbyScreen != null) lobbyScreen.handleChatHistoryResponse(envelope);
             }
             return;
         }
 
-        // Cập nhật sảnh chờ cho các tin nhắn ROOM_LIST, PLAYER_LIST, bạn bè
+        // Chỉ cập nhật màn hình sảnh khi đang xem sảnh; màn hình phòng có các tab riêng.
+        boolean lobbyAlreadyHandled = false;
         if (envelope.getType() == MessageType.ROOM_LIST
                 || envelope.getType() == MessageType.PLAYER_LIST
                 || envelope.getType() == MessageType.ONLINE_LIST
@@ -567,11 +563,15 @@ public class MainApplication extends Application {
                 || envelope.getType() == MessageType.FRIEND_REQUEST
                 || envelope.getType() == MessageType.FRIEND_RESPONSE
                 || envelope.getType() == MessageType.FRIEND_REMOVE
+                || envelope.getType() == MessageType.FRIEND_CANCEL_REQUEST
                 || envelope.getType() == MessageType.FRIEND_REQUEST_NOTIFY
                 || envelope.getType() == MessageType.FRIEND_UPDATE
+                || envelope.getType() == MessageType.SEARCH_PLAYER
+                || envelope.getType() == MessageType.SEARCH_USER_RESPONSE
                 || envelope.getType() == MessageType.ROOM_INVITE_NOTIFY) {
-            if (lobbyScreen != null) {
+            if (lobbyScreen != null && primaryStage.getScene() == lobbyScreen.getScene()) {
                 lobbyScreen.handleMessage(envelope);
+                lobbyAlreadyHandled = true;
             }
         }
 
@@ -589,7 +589,7 @@ public class MainApplication extends Application {
             }
         } else if (gameScreen != null && primaryStage.getScene() == gameScreen.getScene()) {
             gameScreen.handleMessage(envelope);
-        } else if (lobbyScreen != null && primaryStage.getScene() == lobbyScreen.getScene()) {
+        } else if (!lobbyAlreadyHandled && lobbyScreen != null && primaryStage.getScene() == lobbyScreen.getScene()) {
             lobbyScreen.handleMessage(envelope);
         }
         if (adminScreen != null && primaryStage.getScene() == adminScreen.createScene()
@@ -600,20 +600,7 @@ public class MainApplication extends Application {
 
     public void openPrivateChat(String targetUsername, String targetDisplayName) {
         if (targetUsername == null || targetUsername.equalsIgnoreCase(currentUsername)) return;
-        PrivateChatWindow win = openChatWindows.get(targetUsername);
-        if (win == null) {
-            win = new PrivateChatWindow(this, targetUsername, targetDisplayName);
-            openChatWindows.put(targetUsername, win);
-            win.show();
-        } else {
-            win.toFront();
-        }
-    }
-
-    public void onPrivateChatClosed(String targetUsername) {
-        if (targetUsername != null) {
-            openChatWindows.remove(targetUsername);
-        }
+        if (lobbyScreen != null) lobbyScreen.openConversation(targetUsername, targetDisplayName);
     }
 
     public void requestChatInbox() {
@@ -637,10 +624,9 @@ public class MainApplication extends Application {
         applyTheme(scene);
         primaryStage.setScene(scene);
 
-        // Yêu cầu máy chủ gửi lại dữ liệu phòng, người chơi và bạn bè mới nhất
+        // Yêu cầu máy chủ gửi lại dữ liệu phòng và bạn bè mới nhất
         if (webSocketClient != null && webSocketClient.isConnected()) {
             webSocketClient.send(new Envelope(MessageType.ROOM_LIST));
-            webSocketClient.send(new Envelope(MessageType.PLAYER_LIST));
             webSocketClient.send(new Envelope(MessageType.FRIEND_LIST));
             webSocketClient.send(new Envelope(MessageType.FRIEND_PENDING_LIST));
             requestChatInbox();

@@ -176,6 +176,9 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
             case FRIEND_REMOVE:
                 gameService.handleFriendRemove(handler, envelope);
                 break;
+            case FRIEND_CANCEL_REQUEST:
+                gameService.handleFriendCancelRequest(handler, envelope);
+                break;
             case FRIEND_PENDING_LIST:
                 gameService.handleFriendPendingList(handler, envelope);
                 break;

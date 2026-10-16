@@ -13,6 +13,9 @@ import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.scene.input.MouseEvent;
+import javafx.geometry.Point2D;
+import javafx.animation.PauseTransition;
+import javafx.util.Duration;
 
 import java.util.Optional;
 
@@ -22,6 +25,7 @@ public class LobbyScreen {
     private final ObservableList<PlayerEntry> playerList;
     private final ObservableList<FriendEntry> friendList;
     private final ObservableList<PendingRequestEntry> pendingList;
+    private final ObservableList<SearchPlayerEntry> searchResults = FXCollections.observableArrayList();
 
     private ListView<RoomEntry> roomListView;
     private ListView<PlayerEntry> playerListView;
@@ -39,6 +43,11 @@ public class LobbyScreen {
     private StackPane socialContentStack;
     private Label inboxUnreadBadge;
     private InboxDialog inboxDialog;
+    private Dialog<Void> friendSearchDialog;
+    private TextField friendSearchField;
+    private Label friendSearchHint;
+    private String lastFriendSearch = "";
+    private final PauseTransition friendSearchDebounce = new PauseTransition(Duration.millis(280));
 
     private Scene scene;
 
@@ -99,6 +108,16 @@ public class LobbyScreen {
         }
     }
 
+    public static class SearchPlayerEntry {
+        public String username;
+        public String displayName;
+        public int rankingScore;
+        public boolean online;
+        public String friendStatus = "NONE";
+        public boolean requestFromMe;
+        public String getEffectiveName() { return displayName == null || displayName.isBlank() ? username : displayName; }
+    }
+
     public LobbyScreen(MainApplication app) {
         this.app = app;
         this.roomList = FXCollections.observableArrayList();
@@ -119,7 +138,7 @@ public class LobbyScreen {
         topBar.setPadding(new Insets(15, 25, 15, 25));
         topBar.setStyle("-fx-background-color: rgba(0, 0, 0, 0.1);");
 
-        Label brandLabel = new Label("SCRIBBLE IT! — SẢNH CHỜ");
+        Label brandLabel = new Label("VẼ HÌNH ĐOÁN Ý — SẢNH CHỜ");
         brandLabel.setStyle("-fx-font-family: 'Amatic SC'; -fx-font-size: 38px; -fx-font-weight: bold; -fx-text-fill: -fx-ink;");
 
         Region spacer = new Region();
@@ -136,10 +155,6 @@ public class LobbyScreen {
         profileBtn.setTooltip(new Tooltip("Xem & Chỉnh sửa hồ sơ cá nhân / Lịch sử đấu"));
         profileBtn.setOnAction(e -> app.openProfileDialog());
 
-        Button refreshAllBtn = new Button("🔄 Làm mới");
-        refreshAllBtn.getStyleClass().add("pencil-button-sm");
-        refreshAllBtn.setOnAction(e -> refreshAllData());
-
         Button logoutBtn = new Button("Đăng xuất");
         logoutBtn.getStyleClass().add("pencil-button-sm");
         logoutBtn.setOnAction(e -> {
@@ -149,7 +164,7 @@ public class LobbyScreen {
             app.start(app.getPrimaryStage());
         });
 
-        topBar.getChildren().addAll(brandLabel, spacer, welcomeLabel, profileBtn, refreshAllBtn);
+        topBar.getChildren().addAll(brandLabel, spacer, welcomeLabel, profileBtn);
         if (app.isAdmin()) {
             Button adminBtn = new Button("Quản trị");
             adminBtn.getStyleClass().add("pencil-button-sm");
@@ -239,66 +254,43 @@ public class LobbyScreen {
         tabHeader.setAlignment(Pos.CENTER);
 
         tabFriendsBtn = new Button("👥 Bạn bè (0)");
-        tabOnlineBtn = new Button("🌐 Online (0)");
         tabPendingBtn = new Button("🔔 Lời mời (0)");
 
         tabFriendsBtn.setMaxWidth(Double.MAX_VALUE);
-        tabOnlineBtn.setMaxWidth(Double.MAX_VALUE);
         tabPendingBtn.setMaxWidth(Double.MAX_VALUE);
         HBox.setHgrow(tabFriendsBtn, Priority.ALWAYS);
-        HBox.setHgrow(tabOnlineBtn, Priority.ALWAYS);
         HBox.setHgrow(tabPendingBtn, Priority.ALWAYS);
 
-        tabHeader.getChildren().addAll(tabFriendsBtn, tabOnlineBtn, tabPendingBtn);
+        tabHeader.getChildren().addAll(tabFriendsBtn, tabPendingBtn);
 
-        // StackPane containing the 3 tab views
+        // Friends and invitations are the only social views outside a room.
         socialContentStack = new StackPane();
         VBox.setVgrow(socialContentStack, Priority.ALWAYS);
 
         // TAB 1: FRIENDS VIEW
         VBox friendsTabBox = createFriendsTabBox();
 
-        // TAB 2: ONLINE USERS VIEW
-        VBox onlineTabBox = createOnlineTabBox();
-
-        // TAB 3: PENDING REQUESTS VIEW
+        // TAB 2: PENDING REQUESTS VIEW
         VBox pendingTabBox = createPendingTabBox();
 
-        socialContentStack.getChildren().addAll(friendsTabBox, onlineTabBox, pendingTabBox);
+        socialContentStack.getChildren().addAll(friendsTabBox, pendingTabBox);
 
         // Tab switching logic
         Runnable selectFriendsTab = () -> {
             styleActiveTab(tabFriendsBtn);
-            styleInactiveTab(tabOnlineBtn);
             styleInactiveTab(tabPendingBtn);
             friendsTabBox.setVisible(true);
-            onlineTabBox.setVisible(false);
             pendingTabBox.setVisible(false);
-            requestFriends();
-        };
-
-        Runnable selectOnlineTab = () -> {
-            styleInactiveTab(tabFriendsBtn);
-            styleActiveTab(tabOnlineBtn);
-            styleInactiveTab(tabPendingBtn);
-            friendsTabBox.setVisible(false);
-            onlineTabBox.setVisible(true);
-            pendingTabBox.setVisible(false);
-            requestPlayers();
         };
 
         Runnable selectPendingTab = () -> {
             styleInactiveTab(tabFriendsBtn);
-            styleInactiveTab(tabOnlineBtn);
             styleActiveTab(tabPendingBtn);
             friendsTabBox.setVisible(false);
-            onlineTabBox.setVisible(false);
             pendingTabBox.setVisible(true);
-            requestPendingRequests();
         };
 
         tabFriendsBtn.setOnAction(e -> selectFriendsTab.run());
-        tabOnlineBtn.setOnAction(e -> selectOnlineTab.run());
         tabPendingBtn.setOnAction(e -> selectPendingTab.run());
 
         // Default to Friends tab
@@ -310,6 +302,8 @@ public class LobbyScreen {
         root.setCenter(mainContainer);
 
         StackPane lobbyRoot = new StackPane(root);
+        AnchorPane floatingLayer = new AnchorPane();
+        floatingLayer.setPickOnBounds(false);
         Button inboxButton = new Button("💬");
         inboxButton.getStyleClass().add("floating-inbox-button");
         inboxButton.setTooltip(new Tooltip("Kéo để di chuyển · Bấm để mở hộp thư"));
@@ -317,43 +311,56 @@ public class LobbyScreen {
         inboxUnreadBadge = new Label();
         inboxUnreadBadge.getStyleClass().add("inbox-unread-badge");
         inboxUnreadBadge.setVisible(false);
-        inboxUnreadBadge.setManaged(false);
         inboxUnreadBadge.setMouseTransparent(true);
         StackPane inboxFab = new StackPane(inboxButton, inboxUnreadBadge);
+        inboxFab.setMinSize(58, 58);
+        inboxFab.setPrefSize(58, 58);
+        inboxFab.setMaxSize(58, 58);
         StackPane.setAlignment(inboxUnreadBadge, Pos.TOP_RIGHT);
-        StackPane.setAlignment(inboxFab, Pos.BOTTOM_RIGHT);
-        StackPane.setMargin(inboxFab, new Insets(0, 26, 22, 0));
-        lobbyRoot.getChildren().add(inboxFab);
+        AnchorPane.setRightAnchor(inboxFab, 26.0);
+        AnchorPane.setBottomAnchor(inboxFab, 22.0);
+        floatingLayer.getChildren().add(inboxFab);
+        lobbyRoot.getChildren().add(floatingLayer);
 
-        // Keep the inbox button reachable while allowing the user to move it away
-        // from controls it might cover. The StackPane alignment keeps its default
-        // position at the bottom-right until the user drags it.
+        // Drag in the full overlay bounds and keep the icon plus badge together.
         double[] dragStart = new double[2];
-        double[] translationStart = new double[2];
+        double[] grabOffset = new double[2];
         boolean[] dragged = new boolean[1];
+        boolean[] detachedFromCorner = new boolean[1];
+        Runnable keepInboxButtonInBounds = () -> {
+            if (!detachedFromCorner[0]) return;
+            double maxX = Math.max(0, floatingLayer.getWidth() - inboxFab.getWidth());
+            double maxY = Math.max(0, floatingLayer.getHeight() - inboxFab.getHeight());
+            inboxFab.relocate(clamp(inboxFab.getLayoutX(), 0, maxX),
+                    clamp(inboxFab.getLayoutY(), 0, maxY));
+        };
         inboxFab.addEventFilter(MouseEvent.MOUSE_PRESSED, e -> {
-            dragStart[0] = e.getSceneX();
-            dragStart[1] = e.getSceneY();
-            translationStart[0] = inboxFab.getTranslateX();
-            translationStart[1] = inboxFab.getTranslateY();
+            Point2D pointer = floatingLayer.sceneToLocal(e.getSceneX(), e.getSceneY());
+            dragStart[0] = pointer.getX();
+            dragStart[1] = pointer.getY();
+            grabOffset[0] = pointer.getX() - inboxFab.getLayoutX();
+            grabOffset[1] = pointer.getY() - inboxFab.getLayoutY();
             dragged[0] = false;
         });
         inboxFab.addEventFilter(MouseEvent.MOUSE_DRAGGED, e -> {
-            double dx = e.getSceneX() - dragStart[0];
-            double dy = e.getSceneY() - dragStart[1];
+            Point2D pointer = floatingLayer.sceneToLocal(e.getSceneX(), e.getSceneY());
+            double dx = pointer.getX() - dragStart[0];
+            double dy = pointer.getY() - dragStart[1];
             if (!dragged[0] && Math.hypot(dx, dy) < 5) return;
             dragged[0] = true;
-
-            double baseX = lobbyRoot.getWidth() - 26 - inboxFab.getWidth();
-            double baseY = lobbyRoot.getHeight() - 22 - inboxFab.getHeight();
-            double minX = -baseX;
-            double maxX = lobbyRoot.getWidth() - inboxFab.getWidth() - baseX;
-            double minY = -baseY;
-            double maxY = lobbyRoot.getHeight() - inboxFab.getHeight() - baseY;
-            inboxFab.setTranslateX(clamp(translationStart[0] + dx, minX, maxX));
-            inboxFab.setTranslateY(clamp(translationStart[1] + dy, minY, maxY));
+            if (!detachedFromCorner[0]) {
+                AnchorPane.setRightAnchor(inboxFab, null);
+                AnchorPane.setBottomAnchor(inboxFab, null);
+                detachedFromCorner[0] = true;
+            }
+            double maxX = Math.max(0, floatingLayer.getWidth() - inboxFab.getWidth());
+            double maxY = Math.max(0, floatingLayer.getHeight() - inboxFab.getHeight());
+            inboxFab.relocate(clamp(pointer.getX() - grabOffset[0], 0, maxX),
+                    clamp(pointer.getY() - grabOffset[1], 0, maxY));
             e.consume();
         });
+        floatingLayer.widthProperty().addListener((obs, oldValue, newValue) -> keepInboxButtonInBounds.run());
+        floatingLayer.heightProperty().addListener((obs, oldValue, newValue) -> keepInboxButtonInBounds.run());
         inboxButton.setOnAction(e -> {
             if (dragged[0]) {
                 dragged[0] = false;
@@ -397,12 +404,7 @@ public class LobbyScreen {
         addFriendBtn.setStyle("-fx-padding: 2 10; -fx-font-size: 15px;");
         addFriendBtn.setOnAction(e -> promptAddFriend());
 
-        Button refreshFriendsBtn = new Button("🔄");
-        refreshFriendsBtn.getStyleClass().add("pencil-button-sm");
-        refreshFriendsBtn.setStyle("-fx-padding: 2 8; -fx-font-size: 15px;");
-        refreshFriendsBtn.setOnAction(e -> requestFriends());
-
-        friendActionBar.getChildren().addAll(friendCountLabel, sp, addFriendBtn, refreshFriendsBtn);
+        friendActionBar.getChildren().addAll(friendCountLabel, sp, addFriendBtn);
 
         friendListView = new ListView<>(friendList);
         VBox.setVgrow(friendListView, Priority.ALWAYS);
@@ -548,12 +550,7 @@ public class LobbyScreen {
         Region sp = new Region();
         HBox.setHgrow(sp, Priority.ALWAYS);
 
-        Button refreshPlayersBtn = new Button("🔄");
-        refreshPlayersBtn.getStyleClass().add("pencil-button-sm");
-        refreshPlayersBtn.setStyle("-fx-padding: 2 8; -fx-font-size: 15px;");
-        refreshPlayersBtn.setOnAction(e -> requestPlayers());
-
-        onlineActionBar.getChildren().addAll(playerCountLabel, sp, refreshPlayersBtn);
+        onlineActionBar.getChildren().addAll(playerCountLabel, sp);
 
         playerListView = new ListView<>(playerList);
         VBox.setVgrow(playerListView, Priority.ALWAYS);
@@ -654,12 +651,7 @@ public class LobbyScreen {
         Region sp = new Region();
         HBox.setHgrow(sp, Priority.ALWAYS);
 
-        Button refreshPendingBtn = new Button("🔄");
-        refreshPendingBtn.getStyleClass().add("pencil-button-sm");
-        refreshPendingBtn.setStyle("-fx-padding: 2 8; -fx-font-size: 15px;");
-        refreshPendingBtn.setOnAction(e -> requestPendingRequests());
-
-        pendingActionBar.getChildren().addAll(pTitle, sp, refreshPendingBtn);
+        pendingActionBar.getChildren().addAll(pTitle, sp);
 
         pendingListView = new ListView<>(pendingList);
         VBox.setVgrow(pendingListView, Priority.ALWAYS);
@@ -712,9 +704,28 @@ public class LobbyScreen {
     }
 
     private void openInbox() {
-        if (inboxDialog == null) inboxDialog = new InboxDialog(app, app::openPrivateChat);
+        if (inboxDialog == null) inboxDialog = new InboxDialog(app);
         inboxDialog.show();
         app.requestChatInbox();
+    }
+
+    public void openConversation(String username, String displayName) {
+        if (inboxDialog == null) inboxDialog = new InboxDialog(app);
+        inboxDialog.openConversation(username, displayName);
+        app.requestChatInbox();
+    }
+
+    public boolean isConversationOpen(String username) {
+        return inboxDialog != null && inboxDialog.isShowing()
+                && username != null && username.equalsIgnoreCase(inboxDialog.getActiveUsername());
+    }
+
+    public void handleDirectMessage(Envelope envelope) {
+        if (inboxDialog != null) inboxDialog.handleDirectMessage(envelope);
+    }
+
+    public void handleChatHistoryResponse(Envelope envelope) {
+        if (inboxDialog != null) inboxDialog.handleHistoryResponse(envelope);
     }
 
     public void updateInbox(Envelope envelope) {
@@ -722,7 +733,6 @@ public class LobbyScreen {
         if (inboxUnreadBadge != null) {
             inboxUnreadBadge.setText(unread > 99 ? "99+" : Integer.toString(unread));
             inboxUnreadBadge.setVisible(unread > 0);
-            inboxUnreadBadge.setManaged(unread > 0);
         }
         if (inboxDialog != null) inboxDialog.update(envelope);
     }
@@ -736,15 +746,6 @@ public class LobbyScreen {
     }
 
     // --- ACTIONS ---
-    private void refreshAllData() {
-        if (app.getWsClient() != null && app.getWsClient().isConnected()) {
-            app.getWsClient().send(new Envelope(MessageType.ROOM_LIST));
-            app.getWsClient().send(new Envelope(MessageType.PLAYER_LIST));
-            app.getWsClient().send(new Envelope(MessageType.FRIEND_LIST));
-            app.getWsClient().send(new Envelope(MessageType.FRIEND_PENDING_LIST));
-        }
-    }
-
     public void requestFriends() {
         if (app.getWsClient() != null && app.getWsClient().isConnected()) {
             app.getWsClient().send(new Envelope(MessageType.FRIEND_LIST));
@@ -764,12 +765,65 @@ public class LobbyScreen {
     }
 
     private void promptAddFriend() {
-        DoodleDialog.input(app.getPrimaryStage(), "Thêm bạn bè",
-                "Nhập tên đăng nhập (username) của người bạn muốn kết bạn:", "", username -> {
-                    if (username != null && !username.trim().isEmpty()) {
-                        sendFriendRequest(username.trim());
-                    }
-                });
+        if (friendSearchDialog != null && friendSearchDialog.isShowing()) {
+            friendSearchField.requestFocus();
+            return;
+        }
+        friendSearchDialog = new Dialog<>();
+        friendSearchDialog.setTitle("Tìm người chơi");
+        friendSearchDialog.initOwner(app.getPrimaryStage());
+        friendSearchDialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
+        friendSearchField = new TextField();
+        friendSearchField.setPromptText("Tìm theo tên hoặc username...");
+        friendSearchField.setStyle("-fx-font-size: 16px; -fx-padding: 10px;");
+        friendSearchHint = new Label("Nhập tên để tìm người chơi và gửi lời mời kết bạn.");
+        friendSearchHint.setStyle("-fx-text-fill: #64748B; -fx-font-size: 13px;");
+        ListView<SearchPlayerEntry> results = new ListView<>(searchResults);
+        results.setPrefSize(500, 340);
+        results.setPlaceholder(new Label("Chưa có kết quả. Hãy thử tìm tên hoặc username."));
+        results.setCellFactory(view -> new ListCell<>() {
+            @Override protected void updateItem(SearchPlayerEntry player, boolean empty) {
+                super.updateItem(player, empty);
+                if (empty || player == null) { setGraphic(null); return; }
+                HBox row = new HBox(12); row.setAlignment(Pos.CENTER_LEFT); row.setPadding(new Insets(8));
+                Label avatar = new Label(player.online ? "🟢" : "👤");
+                VBox details = new VBox(2);
+                Label name = new Label(player.getEffectiveName());
+                name.setStyle("-fx-font-size: 16px; -fx-font-weight: bold;");
+                Label meta = new Label("@" + player.username + " · " + (player.online ? "Đang online" : "Ngoại tuyến") + " · " + player.rankingScore + " điểm");
+                meta.setStyle("-fx-text-fill: #64748B; -fx-font-size: 12px;");
+                details.getChildren().addAll(name, meta); HBox.setHgrow(details, Priority.ALWAYS);
+                Button action = new Button();
+                if ("ACCEPTED".equals(player.friendStatus)) { action.setText("✓ Bạn bè"); action.setDisable(true); }
+                else if ("PENDING".equals(player.friendStatus) && player.requestFromMe) { action.setText("Hủy lời mời"); action.setOnAction(e -> cancelFriendRequest(player.username)); }
+                else if ("PENDING".equals(player.friendStatus)) { action.setText("Chấp nhận"); action.setOnAction(e -> respondFriendRequest(player.username, true)); }
+                else { action.setText("＋ Kết bạn"); action.getStyleClass().add("pencil-button-sm"); action.setOnAction(e -> sendFriendRequest(player.username)); }
+                row.getChildren().addAll(avatar, details, action); setGraphic(row);
+            }
+        });
+        VBox content = new VBox(10, friendSearchField, friendSearchHint, results);
+        content.setPadding(new Insets(12)); content.setPrefWidth(540);
+        friendSearchDialog.getDialogPane().setContent(content);
+        friendSearchField.textProperty().addListener((obs, oldValue, value) -> {
+            friendSearchDebounce.stop();
+            String query = value == null ? "" : value.trim();
+            searchResults.clear();
+            if (query.isEmpty()) { friendSearchHint.setText("Nhập tên để tìm người chơi và gửi lời mời kết bạn."); return; }
+            friendSearchHint.setText("Đang tìm người chơi…");
+            friendSearchDebounce.setOnFinished(e -> searchPlayers(query));
+            friendSearchDebounce.playFromStart();
+        });
+        friendSearchDialog.setOnHidden(e -> { friendSearchDebounce.stop(); friendSearchDialog = null; });
+        friendSearchDialog.show();
+        friendSearchField.requestFocus();
+    }
+
+    private void searchPlayers(String query) {
+        if (app.getWsClient() == null || !app.getWsClient().isConnected()) return;
+        lastFriendSearch = query;
+        Envelope request = new Envelope(MessageType.SEARCH_PLAYER);
+        request.put("keyword", query);
+        app.getWsClient().send(request);
     }
 
     public void sendFriendRequest(String targetUsername) {
@@ -781,6 +835,7 @@ public class LobbyScreen {
         Envelope env = new Envelope(MessageType.FRIEND_REQUEST);
         env.put("targetUsername", targetUsername.trim());
         app.getWsClient().send(env);
+        if (friendSearchHint != null) friendSearchHint.setText("Đang gửi lời mời tới @" + targetUsername.trim() + "…");
     }
 
     public void respondFriendRequest(String senderUsername, boolean accept) {
@@ -788,6 +843,13 @@ public class LobbyScreen {
         env.put("senderUsername", senderUsername);
         env.putBoolean("accept", accept);
         app.getWsClient().send(env);
+    }
+
+    private void cancelFriendRequest(String username) {
+        Envelope request = new Envelope(MessageType.FRIEND_CANCEL_REQUEST);
+        request.put("targetUsername", username);
+        app.getWsClient().send(request);
+        if (friendSearchHint != null) friendSearchHint.setText("Đang hủy lời mời tới @" + username + "…");
     }
 
     private void confirmRemoveFriend(String targetUsername) {
@@ -811,7 +873,7 @@ public class LobbyScreen {
                     }
                     Envelope env = new Envelope(MessageType.ROOM_CREATE);
                     env.put("roomName", trimmed);
-                    env.put("roomPassword", password);
+                    if (password != null && !password.isBlank()) env.put("roomPassword", password);
                     app.getWsClient().send(env);
                 });
     }
@@ -890,9 +952,6 @@ public class LobbyScreen {
                 if (playerCountLabel != null) {
                     playerCountLabel.setText("Người chơi đang online: (" + playerList.size() + ")");
                 }
-                if (tabOnlineBtn != null) {
-                    tabOnlineBtn.setText("🌐 Online (" + playerList.size() + ")");
-                }
             } else if (env.getType() == MessageType.FRIEND_LIST) {
                 friendList.clear();
                 if (env.getData() != null && env.getData().has("friends")) {
@@ -942,25 +1001,48 @@ public class LobbyScreen {
                 if (tabPendingBtn != null) {
                     tabPendingBtn.setText("🔔 Lời mời (" + pendingList.size() + ")");
                 }
+            } else if (env.getType() == MessageType.SEARCH_PLAYER || env.getType() == MessageType.SEARCH_USER_RESPONSE) {
+                if (friendSearchDialog == null || !friendSearchDialog.isShowing()) return;
+                searchResults.clear();
+                JsonNode results = env.getData() == null ? null : env.getData().get("results");
+                if (results != null) results.forEach(node -> {
+                    SearchPlayerEntry entry = new SearchPlayerEntry();
+                    entry.username = node.path("username").asText("");
+                    entry.displayName = node.path("displayName").asText(entry.username);
+                    entry.rankingScore = node.path("rankingScore").asInt(0);
+                    entry.online = node.path("isOnline").asBoolean(node.path("online").asBoolean(false));
+                    entry.friendStatus = node.path("friendStatus").asText("NONE");
+                    entry.requestFromMe = node.path("isSender").asBoolean(false);
+                    if (!entry.username.isBlank()) searchResults.add(entry);
+                });
+                if (friendSearchHint != null) friendSearchHint.setText(searchResults.isEmpty()
+                        ? "Không tìm thấy người chơi phù hợp." : searchResults.size() + " người chơi · chọn Kết bạn để gửi lời mời.");
             } else if (env.getType() == MessageType.FRIEND_REQUEST) {
                 if (env.isSuccess()) {
-                    DoodleDialog.info(app.getPrimaryStage(), "Kết bạn thành công", env.getContent() != null ? env.getContent() : "Đã gửi lời mời kết bạn.");
+                    if (friendSearchHint != null) friendSearchHint.setText("Đã gửi lời mời. Bạn sẽ thấy trạng thái cập nhật ngay.");
+                    requestPendingRequests();
+                    requestFriends();
+                    if (!lastFriendSearch.isBlank()) searchPlayers(lastFriendSearch);
                 } else {
-                    DoodleDialog.error(app.getPrimaryStage(), "Lỗi kết bạn", env.getContent() != null ? env.getContent() : "Không thể gửi lời mời kết bạn.");
+                    if (friendSearchHint != null) friendSearchHint.setText(env.getContent() != null ? env.getContent() : "Không thể gửi lời mời kết bạn.");
                 }
             } else if (env.getType() == MessageType.FRIEND_RESPONSE) {
                 requestFriends();
                 requestPendingRequests();
+                if (!lastFriendSearch.isBlank()) searchPlayers(lastFriendSearch);
+            } else if (env.getType() == MessageType.FRIEND_CANCEL_REQUEST) {
+                if (friendSearchHint != null) friendSearchHint.setText(env.getContent() == null ? "Đã cập nhật lời mời." : env.getContent());
+                requestPendingRequests();
+                if (!lastFriendSearch.isBlank()) searchPlayers(lastFriendSearch);
             } else if (env.getType() == MessageType.FRIEND_REMOVE) {
                 requestFriends();
             } else if (env.getType() == MessageType.FRIEND_REQUEST_NOTIFY) {
-                String senderName = env.getString("senderDisplayName");
-                if (senderName == null) senderName = env.getString("senderUsername");
-                DoodleDialog.info(app.getPrimaryStage(), "Lời mời kết bạn",
-                        "🔔 " + (senderName != null ? senderName : "Một người chơi") + " đã gửi cho bạn một lời mời kết bạn!");
                 requestPendingRequests();
+                if (tabPendingBtn != null) tabPendingBtn.setText("🔔 Lời mời · mới");
             } else if (env.getType() == MessageType.FRIEND_UPDATE) {
                 requestFriends();
+                requestPendingRequests();
+                if (!lastFriendSearch.isBlank()) searchPlayers(lastFriendSearch);
             } else if (env.getType() == MessageType.ROOM_INVITE_NOTIFY) {
                 String inviter = env.getString("senderDisplayName");
                 if (inviter == null) inviter = env.getString("senderUsername");

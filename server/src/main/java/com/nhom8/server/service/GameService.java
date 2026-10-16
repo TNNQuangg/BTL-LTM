@@ -38,6 +38,7 @@ public class GameService {
 
     /** Bảng ánh xạ username → ClientSession cho tất cả người chơi đang trực tuyến */
     private final ConcurrentHashMap<String, ClientSession> onlineClients = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Set<String>> roomInvites = new ConcurrentHashMap<>();
 
     /** Danh sách tất cả ClientSession đang kết nối (kể cả chưa đăng nhập) */
     private final List<ClientSession> allClients = Collections.synchronizedList(new ArrayList<>());
@@ -161,6 +162,8 @@ public class GameService {
         try {
             authService.register(username, password, displayName);
             handler.sendMessage(Envelope.success(MessageType.REGISTER, "Đăng ký thành công!"));
+            broadcastAdminStats();
+            broadcastAdminUsers();
         } catch (Exception e) {
             handler.sendMessage(Envelope.error(MessageType.REGISTER, e.getMessage()));
         }
@@ -181,15 +184,18 @@ public class GameService {
             return;
         }
 
-        String roomName = request.getOrDefault("roomName", "Phòng " + handler.getUsername());
-        String roomPassword = request.get("roomPassword");
+        String roomName = request.getString("roomName");
+        if (roomName == null || roomName.isBlank()) roomName = "Phòng " + handler.getUsername();
+        else roomName = roomName.trim();
+        String roomPassword = request.getString("roomPassword");
         if (roomPassword != null) roomPassword = roomPassword.trim();
-        if (roomPassword == null || roomPassword.length() < 4 || roomPassword.length() > 32) {
+        if (roomPassword != null && !roomPassword.isEmpty()
+                && (roomPassword.length() < 4 || roomPassword.length() > 32)) {
             handler.sendMessage(Envelope.error(MessageType.ROOM_RESPONSE,
-                    "Mật khẩu phòng bắt buộc và phải từ 4 đến 32 ký tự."));
+                    "Mật khẩu phòng nếu đặt phải từ 4 đến 32 ký tự."));
             return;
         }
-        String passwordHash = roomPasswordEncoder.encode(roomPassword);
+        String passwordHash = roomPassword == null || roomPassword.isEmpty() ? null : roomPasswordEncoder.encode(roomPassword);
         Room room = roomManager.createRoom(handler, roomName, passwordHash);
 
         if (room != null) {
@@ -227,7 +233,7 @@ public class GameService {
             return;
         }
 
-        String roomId = request.get("roomId");
+        String roomId = request.getString("roomId");
         Room room = roomManager.getRoom(roomId);
 
         if (room == null) {
@@ -235,7 +241,8 @@ public class GameService {
             return;
         }
 
-        if (room.hasPassword() && !room.matchesPassword(request.get("roomPassword"), roomPasswordEncoder)) {
+        boolean invited = roomInvites.getOrDefault(roomId, Collections.emptySet()).contains(handler.getUsername());
+        if (!invited && room.hasPassword() && !room.matchesPassword(request.get("roomPassword"), roomPasswordEncoder)) {
             Envelope passwordRequired = Envelope.error(MessageType.ROOM_PASSWORD_REQUIRED,
                     "Phòng này có mật khẩu hoặc mật khẩu chưa đúng.");
             passwordRequired.put("roomId", room.getRoomId());
@@ -257,6 +264,10 @@ public class GameService {
         }
 
         room.addPlayer(handler);
+        if (invited) {
+            Set<String> invitees = roomInvites.get(roomId);
+            if (invitees != null) invitees.remove(handler.getUsername());
+        }
         handler.setCurrentRoomId(roomId);
 
         Envelope response = Envelope.success(MessageType.ROOM_RESPONSE, "Tham gia phòng thành công!");
@@ -640,13 +651,57 @@ public class GameService {
 
     public void handleAdminStats(ClientSession handler) {
         if (!requireAdmin(handler, MessageType.ADMIN_STATS)) return;
-        handler.sendMessage(Envelope.success(MessageType.ADMIN_STATS, "Thống kê hệ thống")
+        handler.sendMessage(createAdminStats());
+    }
+
+    private Envelope createAdminStats() {
+        return Envelope.success(MessageType.ADMIN_STATS, "Thống kê hệ thống")
                 .put("totalUsers", userRepository.count())
                 .put("onlineUsers", onlineClients.size())
                 .put("activeRooms", roomManager.getRoomCount())
                 .put("totalMatches", matchRepository.count())
                 .put("totalPaintings", paintingRepository.count())
-                .put("customTopics", customTopicRepository.count()));
+                .put("customTopics", customTopicRepository.count());
+    }
+
+    public void broadcastAdminStats() {
+        for (ClientSession session : onlineClients.values()) {
+            if (isAdmin(session)) session.sendMessage(createAdminStats());
+        }
+    }
+
+    private void broadcastAdminUsers() {
+        List<User> allUsers = userRepository.findAllByOrderByRankingScoreDesc();
+        List<Map<String, Object>> usersData = new ArrayList<>();
+        for (User user : allUsers) {
+            Map<String, Object> map = new HashMap<>();
+            map.put("userId", user.getUserId());
+            map.put("username", user.getUsername());
+            map.put("rankingScore", user.getRankingScore());
+            map.put("role", user.getRole());
+            usersData.add(map);
+        }
+        Envelope response = Envelope.success(MessageType.ADMIN_USERS_RESPONSE, "Success");
+        response.put("users", usersData);
+        for (ClientSession session : onlineClients.values()) {
+            if (isAdmin(session)) session.sendMessage(response);
+        }
+    }
+
+    private void broadcastAdminRooms() {
+        Envelope response = Envelope.success(MessageType.ADMIN_GET_ROOMS, "Danh sách phòng")
+                .put("rooms", roomManager.getRoomListData());
+        for (ClientSession session : onlineClients.values()) {
+            if (isAdmin(session)) session.sendMessage(response);
+        }
+    }
+
+    private void broadcastAdminTopics() {
+        Envelope response = Envelope.success(MessageType.ADMIN_TOPICS, "Từ khóa tự thêm")
+                .put("topics", customTopicRepository.findAll().stream().map(CustomTopic::getWord).sorted().toList());
+        for (ClientSession session : onlineClients.values()) {
+            if (isAdmin(session)) session.sendMessage(response);
+        }
     }
 
     public void handleAdminTopics(ClientSession handler) {
@@ -666,8 +721,8 @@ public class GameService {
         customTopicRepository.save(new CustomTopic(word));
         refreshCustomTopics();
         handler.sendMessage(Envelope.success(MessageType.ADMIN_TOPIC_ADD, "Đã thêm từ khóa: " + word));
-        handleAdminTopics(handler);
-        handleAdminStats(handler);
+        broadcastAdminTopics();
+        broadcastAdminStats();
     }
 
     public void handleAdminTopicDelete(ClientSession handler, Envelope request) {
@@ -682,8 +737,8 @@ public class GameService {
         customTopicRepository.delete(topic);
         refreshCustomTopics();
         handler.sendMessage(Envelope.success(MessageType.ADMIN_TOPIC_DELETE, "Đã xóa từ khóa: " + topic.getWord()));
-        handleAdminTopics(handler);
-        handleAdminStats(handler);
+        broadcastAdminTopics();
+        broadcastAdminStats();
     }
 
     // ========================================================================
@@ -731,6 +786,17 @@ public class GameService {
             notify.put("username", remover.getUsername());
             notify.setContent("Danh sách bạn bè đã thay đổi.");
             receiverSession.sendMessage(notify);
+        }
+    }
+
+    public void notifyFriendRequestCancelled(User receiver, User sender) {
+        ClientSession session = onlineClients.get(receiver.getUsername());
+        if (session != null) {
+            Envelope update = new Envelope(MessageType.FRIEND_UPDATE);
+            update.setSuccess(true);
+            update.put("action", "REQUEST_CANCELLED");
+            update.put("username", sender.getUsername());
+            session.sendMessage(update);
         }
     }
 
@@ -823,9 +889,16 @@ public class GameService {
         }
 
         Room room = roomManager.getRoom(roomId);
-        if (room == null) return;
+        if (room == null || !roomId.equals(handler.getCurrentRoomId())) {
+            handler.sendMessage(Envelope.error(MessageType.FRIEND_UPDATE, "Bạn cần ở trong phòng muốn mời người chơi."));
+            return;
+        }
+        if (room.isPlaying() || room.isFull()) {
+            handler.sendMessage(Envelope.error(MessageType.FRIEND_UPDATE, "Phòng đang chơi hoặc đã đủ người, không thể mời thêm."));
+            return;
+        }
 
-        // Lời mời không bỏ qua mật khẩu phòng; server vẫn xác thực khi người nhận tham gia.
+        roomInvites.computeIfAbsent(roomId, ignored -> ConcurrentHashMap.newKeySet()).add(targetUsername);
         Envelope invite = new Envelope(MessageType.ROOM_INVITE_NOTIFY);
         invite.put("roomId", roomId);
         invite.put("roomName", room.getRoomName());
@@ -842,14 +915,18 @@ public class GameService {
      * Xử lý phản hồi lời mời vào phòng (chấp nhận hoặc từ chối).
      */
     public void handleRoomInviteRespond(ClientSession handler, Envelope request) {
-        boolean accept = Boolean.TRUE.equals(request.get("accept"));
-        String roomId = request.get("roomId");
-
-        if (!accept || roomId == null) return;
-
-        // Chấp nhận → tự động join room
+        boolean accept = request.getBoolean("accept", false);
+        String roomId = request.getString("roomId");
+        if (roomId == null || handler.getUsername() == null) return;
+        Set<String> invitees = roomInvites.get(roomId);
+        if (invitees == null || !invitees.contains(handler.getUsername())) {
+            if (accept) handler.sendMessage(Envelope.error(MessageType.ROOM_RESPONSE,
+                    "Lời mời đã hết hiệu lực. Hãy nhờ người trong phòng mời lại."));
+            return;
+        }
+        if (!accept) { invitees.remove(handler.getUsername()); return; }
         Envelope joinRequest = new Envelope(MessageType.JOIN_ROOM);
-        joinRequest.put("roomId", roomId);
+        joinRequest.putString("roomId", roomId);
         handleJoinRoom(handler, joinRequest);
     }
 
@@ -941,6 +1018,8 @@ public class GameService {
         for (ClientSession handler : onlineClients.values()) {
             handler.sendMessage(msg);
         }
+        broadcastAdminStats();
+        broadcastAdminUsers();
     }
 
     public void sendRoomList(ClientSession handler) {
@@ -956,6 +1035,8 @@ public class GameService {
         for (ClientSession handler : onlineClients.values()) {
             handler.sendMessage(msg);
         }
+        broadcastAdminStats();
+        broadcastAdminRooms();
     }
 
     public void broadcastRoomUpdate(Room room) {
@@ -1048,6 +1129,17 @@ public class GameService {
         }
     }
 
+    public void handleFriendCancelRequest(ClientSession handler, Envelope request) {
+        String targetUsername = request.get("targetUsername");
+        if (handler.getUsername() == null || targetUsername == null) return;
+        try {
+            friendService.cancelFriendRequest(handler.getUsername(), targetUsername);
+            handler.sendMessage(Envelope.success(MessageType.FRIEND_CANCEL_REQUEST, "Đã hủy lời mời kết bạn."));
+        } catch (Exception e) {
+            handler.sendMessage(Envelope.error(MessageType.FRIEND_CANCEL_REQUEST, e.getMessage()));
+        }
+    }
+
     public void handleFriendPendingList(ClientSession handler, Envelope request) {
         if (handler.getUsername() == null) return;
         try {
@@ -1066,36 +1158,8 @@ public class GameService {
 
     public void handleSearchPlayer(ClientSession handler, Envelope request) {
         String keyword = request.get("keyword");
-        if (keyword == null || keyword.trim().isEmpty()) return;
-
-        List<User> results = userRepository.findByUsernameContainingIgnoreCase(keyword.trim());
-        List<User> displayResults = userRepository.findByDisplayNameContainingIgnoreCase(keyword.trim());
-
-        // Hợp nhất kết quả, loại trùng
-        Set<String> seen = new HashSet<>();
-        List<Map<String, Object>> playerList = new ArrayList<>();
-        for (User u : results) {
-            if (seen.add(u.getUsername())) {
-                Map<String, Object> info = new HashMap<>();
-                info.put("username", u.getUsername());
-                info.put("displayName", u.getDisplayName());
-                info.put("avatar", u.getAvatar());
-                info.put("rankingScore", u.getRankingScore());
-                info.put("online", isUserOnline(u.getUsername()));
-                playerList.add(info);
-            }
-        }
-        for (User u : displayResults) {
-            if (seen.add(u.getUsername())) {
-                Map<String, Object> info = new HashMap<>();
-                info.put("username", u.getUsername());
-                info.put("displayName", u.getDisplayName());
-                info.put("avatar", u.getAvatar());
-                info.put("rankingScore", u.getRankingScore());
-                info.put("online", isUserOnline(u.getUsername()));
-                playerList.add(info);
-            }
-        }
+        if (keyword == null || keyword.trim().isEmpty() || handler.getUsername() == null) return;
+        List<Map<String, Object>> playerList = friendService.searchUsers(keyword.trim(), handler.getUsername());
 
         Envelope response = Envelope.success(MessageType.SEARCH_PLAYER, "Kết quả tìm kiếm.");
         response.put("results", playerList);

@@ -181,6 +181,7 @@ public class Envelope {
     public <T> T get(String key) {
         if (data != null && data.has(key)) {
             JsonNode node = data.get(key);
+            if (node == null || node.isNull()) return null;
             if (node.isTextual()) return (T) node.asText();
             if (node.isInt()) return (T) Integer.valueOf(node.asInt());
             if (node.isBoolean()) return (T) Boolean.valueOf(node.asBoolean());
