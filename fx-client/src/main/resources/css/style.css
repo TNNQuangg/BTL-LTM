@@ -216,6 +216,37 @@
     -fx-translate-y: -4;
 }
 
+.modal-scrim {
+    -fx-background-color: rgba(21, 21, 21, 0.42);
+}
+
+.modal-card {
+    -fx-background-color: #FDFBF7;
+    -fx-background-radius: 18;
+    -fx-border-color: rgba(23, 23, 23, 0.16);
+    -fx-border-width: 1;
+    -fx-border-radius: 18;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.25), 28, 0.16, 0, 10);
+    -fx-padding: 0;
+}
+
+.modal-close-button {
+    -fx-background-color: rgba(23, 23, 23, 0.08);
+    -fx-text-fill: #171717;
+    -fx-font-family: "Patrick Hand";
+    -fx-font-size: 17px;
+    -fx-font-weight: bold;
+    -fx-background-radius: 18;
+    -fx-min-width: 34;
+    -fx-min-height: 34;
+    -fx-cursor: hand;
+}
+
+.modal-close-button:hover {
+    -fx-background-color: #171717;
+    -fx-text-fill: #F5C800;
+}
+
 /* Tùy chỉnh danh sách ListView kiểu sketch */
 .list-view {
     -fx-background-color: white;

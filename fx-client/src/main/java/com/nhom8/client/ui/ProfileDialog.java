@@ -9,11 +9,8 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
-import javafx.stage.Modality;
-import javafx.stage.Stage;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -25,7 +22,8 @@ import java.util.List;
 public class ProfileDialog {
 
     private final MainApplication app;
-    private final Stage stage;
+    private ModalOverlay overlay;
+    private BorderPane contentRoot;
 
     // Tab 1: Profile & Edit
     private Label usernameLbl;
@@ -56,17 +54,12 @@ public class ProfileDialog {
 
     public ProfileDialog(MainApplication app) {
         this.app = app;
-        this.stage = new Stage();
-        stage.initModality(Modality.APPLICATION_MODAL);
-        if (app.getPrimaryStage() != null) {
-            stage.initOwner(app.getPrimaryStage());
-        }
-        stage.setTitle("👤 Trang cá nhân & Lịch sử đấu - " + app.getCurrentDisplayName());
         initUI();
     }
 
     private void initUI() {
         BorderPane root = new BorderPane();
+        contentRoot = root;
         root.setStyle("-fx-background-color: #FDFBF7;");
 
         // --- TOP BAR ---
@@ -83,7 +76,7 @@ public class ProfileDialog {
 
         Button closeBtn = new Button("✖ Đóng");
         closeBtn.getStyleClass().add("pencil-button-sm");
-        closeBtn.setOnAction(e -> stage.close());
+        closeBtn.setOnAction(e -> close());
 
         topBar.getChildren().addAll(titleLbl, spacer, closeBtn);
         root.setTop(topBar);
@@ -137,9 +130,6 @@ public class ProfileDialog {
         centerBox.getChildren().addAll(tabHeader, contentStack);
         root.setCenter(centerBox);
 
-        Scene scene = new Scene(root, 720, 680);
-        MainApplication.applyTheme(scene);
-        stage.setScene(scene);
     }
 
     private void styleActiveTab(Button btn) {
@@ -386,13 +376,20 @@ public class ProfileDialog {
 
     // --- ACTIONS & NETWORKING ---
     public void show() {
-        stage.show();
-        stage.toFront();
+        if (overlay == null || !overlay.isShowing()) {
+            overlay = ModalOverlay.show(app.getPrimaryStage(), contentRoot, 760, 680, null);
+        } else {
+            overlay.bringToFront();
+        }
         requestProfileData();
     }
 
     public void toFront() {
-        stage.toFront();
+        if (overlay != null) overlay.bringToFront();
+    }
+
+    private void close() {
+        if (overlay != null) overlay.close();
     }
 
     private void requestProfileData() {
@@ -414,7 +411,7 @@ public class ProfileDialog {
     private void sendUpdateDisplayName() {
         String newName = displayNameField.getText();
         if (newName == null || newName.trim().length() < 2 || newName.trim().length() > 30) {
-            DoodleDialog.warning(stage, "Tên không hợp lệ", "Tên hiển thị phải từ 2 đến 30 ký tự!");
+            DoodleDialog.warning(app.getPrimaryStage(), "Tên không hợp lệ", "Tên hiển thị phải từ 2 đến 30 ký tự!");
             return;
         }
         if (app.getWsClient() != null && app.getWsClient().isConnected()) {
@@ -438,15 +435,15 @@ public class ProfileDialog {
         String confirmPass = confirmPassField.getText();
 
         if (oldPass == null || oldPass.isEmpty()) {
-            DoodleDialog.warning(stage, "Thiếu thông tin", "Vui lòng nhập mật khẩu hiện tại!");
+            DoodleDialog.warning(app.getPrimaryStage(), "Thiếu thông tin", "Vui lòng nhập mật khẩu hiện tại!");
             return;
         }
         if (newPass == null || newPass.length() < 4) {
-            DoodleDialog.warning(stage, "Mật khẩu quá ngắn", "Mật khẩu mới phải có ít nhất 4 ký tự!");
+            DoodleDialog.warning(app.getPrimaryStage(), "Mật khẩu quá ngắn", "Mật khẩu mới phải có ít nhất 4 ký tự!");
             return;
         }
         if (!newPass.equals(confirmPass)) {
-            DoodleDialog.warning(stage, "Mật khẩu không khớp", "Xác nhận mật khẩu mới không trùng khớp!");
+            DoodleDialog.warning(app.getPrimaryStage(), "Mật khẩu không khớp", "Xác nhận mật khẩu mới không trùng khớp!");
             return;
         }
 
@@ -492,7 +489,7 @@ public class ProfileDialog {
     public void handleUpdateProfileResponse(Envelope env) {
         Platform.runLater(() -> {
             if (env.isSuccess()) {
-                DoodleDialog.showToast(stage, "✔ " + (env.getContent() != null ? env.getContent() : "Cập nhật thành công!"));
+                DoodleDialog.showToast(app.getPrimaryStage(), "✔ " + (env.getContent() != null ? env.getContent() : "Cập nhật thành công!"));
                 if (oldPassField != null) oldPassField.clear();
                 if (newPassField != null) newPassField.clear();
                 if (confirmPassField != null) confirmPassField.clear();
@@ -502,7 +499,7 @@ public class ProfileDialog {
                     app.setCurrentDisplayName(updatedDisplayName);
                 }
             } else {
-                DoodleDialog.error(stage, "Cập nhật thất bại", env.getContent() != null ? env.getContent() : "Không thể cập nhật thông tin.");
+                DoodleDialog.error(app.getPrimaryStage(), "Cập nhật thất bại", env.getContent() != null ? env.getContent() : "Không thể cập nhật thông tin.");
             }
         });
     }

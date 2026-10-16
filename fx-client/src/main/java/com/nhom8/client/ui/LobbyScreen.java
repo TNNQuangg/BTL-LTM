@@ -12,6 +12,7 @@ import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
+import javafx.scene.input.MouseEvent;
 
 import java.util.Optional;
 
@@ -311,21 +312,63 @@ public class LobbyScreen {
         StackPane lobbyRoot = new StackPane(root);
         Button inboxButton = new Button("💬");
         inboxButton.getStyleClass().add("floating-inbox-button");
-        inboxButton.setTooltip(new Tooltip("Mở hộp thư và xem tin nhắn chưa đọc"));
-        inboxButton.setOnAction(e -> openInbox());
+        inboxButton.setTooltip(new Tooltip("Kéo để di chuyển · Bấm để mở hộp thư"));
+        inboxButton.setCursor(javafx.scene.Cursor.MOVE);
         inboxUnreadBadge = new Label();
         inboxUnreadBadge.getStyleClass().add("inbox-unread-badge");
         inboxUnreadBadge.setVisible(false);
         inboxUnreadBadge.setManaged(false);
+        inboxUnreadBadge.setMouseTransparent(true);
         StackPane inboxFab = new StackPane(inboxButton, inboxUnreadBadge);
         StackPane.setAlignment(inboxUnreadBadge, Pos.TOP_RIGHT);
         StackPane.setAlignment(inboxFab, Pos.BOTTOM_RIGHT);
         StackPane.setMargin(inboxFab, new Insets(0, 26, 22, 0));
         lobbyRoot.getChildren().add(inboxFab);
 
+        // Keep the inbox button reachable while allowing the user to move it away
+        // from controls it might cover. The StackPane alignment keeps its default
+        // position at the bottom-right until the user drags it.
+        double[] dragStart = new double[2];
+        double[] translationStart = new double[2];
+        boolean[] dragged = new boolean[1];
+        inboxFab.addEventFilter(MouseEvent.MOUSE_PRESSED, e -> {
+            dragStart[0] = e.getSceneX();
+            dragStart[1] = e.getSceneY();
+            translationStart[0] = inboxFab.getTranslateX();
+            translationStart[1] = inboxFab.getTranslateY();
+            dragged[0] = false;
+        });
+        inboxFab.addEventFilter(MouseEvent.MOUSE_DRAGGED, e -> {
+            double dx = e.getSceneX() - dragStart[0];
+            double dy = e.getSceneY() - dragStart[1];
+            if (!dragged[0] && Math.hypot(dx, dy) < 5) return;
+            dragged[0] = true;
+
+            double baseX = lobbyRoot.getWidth() - 26 - inboxFab.getWidth();
+            double baseY = lobbyRoot.getHeight() - 22 - inboxFab.getHeight();
+            double minX = -baseX;
+            double maxX = lobbyRoot.getWidth() - inboxFab.getWidth() - baseX;
+            double minY = -baseY;
+            double maxY = lobbyRoot.getHeight() - inboxFab.getHeight() - baseY;
+            inboxFab.setTranslateX(clamp(translationStart[0] + dx, minX, maxX));
+            inboxFab.setTranslateY(clamp(translationStart[1] + dy, minY, maxY));
+            e.consume();
+        });
+        inboxButton.setOnAction(e -> {
+            if (dragged[0]) {
+                dragged[0] = false;
+                return;
+            }
+            openInbox();
+        });
+
         scene = new Scene(lobbyRoot, 1100, 640);
         MainApplication.applyTheme(scene);
         return scene;
+    }
+
+    private static double clamp(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     private void styleActiveTab(Button btn) {

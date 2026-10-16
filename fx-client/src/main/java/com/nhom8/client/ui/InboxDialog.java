@@ -8,7 +8,6 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.scene.Scene;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
@@ -18,8 +17,6 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
-import javafx.stage.Modality;
-import javafx.stage.Stage;
 
 import java.util.function.BiConsumer;
 
@@ -33,17 +30,16 @@ public final class InboxDialog {
         public int unread;
     }
 
-    private final Stage stage = new Stage();
+    private final MainApplication app;
+    private ModalOverlay overlay;
     private final ObservableList<Conversation> conversations = FXCollections.observableArrayList();
     private final BiConsumer<String, String> openChat;
     private final Label summary = new Label("Đang tải hộp thư…");
     private final ListView<Conversation> list = new ListView<>(conversations);
 
     public InboxDialog(MainApplication app, BiConsumer<String, String> openChat) {
+        this.app = app;
         this.openChat = openChat;
-        stage.initOwner(app.getPrimaryStage());
-        stage.initModality(Modality.NONE);
-        stage.setTitle("💬 Hộp thư");
 
         BorderPane root = new BorderPane();
         root.setStyle("-fx-background-color: #FDFBF7;");
@@ -61,7 +57,11 @@ public final class InboxDialog {
         Button refresh = new Button("🔄 Làm mới");
         refresh.getStyleClass().add("pencil-button-sm");
         refresh.setOnAction(e -> app.requestChatInbox());
-        header.getChildren().addAll(heading, spacer, refresh);
+        Button close = new Button("✕");
+        close.getStyleClass().add("modal-close-button");
+        close.setTooltip(new javafx.scene.control.Tooltip("Đóng hộp thư (Esc)"));
+        close.setOnAction(e -> hide());
+        header.getChildren().addAll(heading, spacer, refresh, close);
 
         list.setPlaceholder(new Label("Chưa có cuộc trò chuyện nào."));
         list.setCellFactory(view -> new ListCell<>() {
@@ -111,14 +111,24 @@ public final class InboxDialog {
         root.setTop(header);
         root.setCenter(list);
         root.setBottom(footer);
-        Scene scene = new Scene(root, 490, 500);
-        MainApplication.applyTheme(scene);
-        stage.setScene(scene);
+        root.setPadding(new Insets(0));
+        root.setMaxSize(490, 500);
+        root.setPrefSize(490, 500);
+        this.root = root;
     }
 
+    private final BorderPane root;
+
     public void show() {
-        if (!stage.isShowing()) stage.show();
-        stage.toFront();
+        if (overlay == null || !overlay.isShowing()) {
+            overlay = ModalOverlay.show(app.getPrimaryStage(), root, 490, 500, null);
+        } else {
+            overlay.bringToFront();
+        }
+    }
+
+    public void hide() {
+        if (overlay != null) overlay.close();
     }
 
     public void update(Envelope envelope) {
@@ -146,8 +156,13 @@ public final class InboxDialog {
     private void openSelected() {
         Conversation item = list.getSelectionModel().getSelectedItem();
         if (item == null) return;
-        stage.hide();
-        openChat.accept(item.username, item.displayName);
+        String username = item.username;
+        String displayName = item.displayName;
+        if (overlay != null && overlay.isShowing()) {
+            overlay.close(() -> openChat.accept(username, displayName));
+        } else {
+            openChat.accept(username, displayName);
+        }
     }
 
     private String formatTime(String timestamp) {

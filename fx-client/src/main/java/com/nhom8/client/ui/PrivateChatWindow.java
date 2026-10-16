@@ -7,10 +7,8 @@ import com.nhom8.common.message.MessageType;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
-import javafx.stage.Stage;
 
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
@@ -28,24 +26,25 @@ public class PrivateChatWindow {
     private final MainApplication app;
     private final String targetUsername;
     private final String targetDisplayName;
-    private final Stage stage;
+    private ModalOverlay overlay;
 
     private VBox messageContainer;
     private ScrollPane scrollPane;
     private TextField inputField;
     private Button sendBtn;
     private Label statusLabel;
+    private BorderPane contentRoot;
 
     public PrivateChatWindow(MainApplication app, String targetUsername, String targetDisplayName) {
         this.app = app;
         this.targetUsername = targetUsername;
         this.targetDisplayName = (targetDisplayName != null && !targetDisplayName.isEmpty()) ? targetDisplayName : targetUsername;
-        this.stage = new Stage();
         initUI();
     }
 
     private void initUI() {
         BorderPane root = new BorderPane();
+        contentRoot = root;
         root.setStyle("-fx-background-color: #FDFBF7;");
 
         // --- TOP BAR ---
@@ -75,7 +74,12 @@ public class PrivateChatWindow {
         refreshBtn.setStyle("-fx-padding: 2 10; -fx-font-size: 16px;");
         refreshBtn.setOnAction(e -> requestHistory());
 
-        topBar.getChildren().addAll(avatarLbl, titleBox, spacer, refreshBtn);
+        Button closeBtn = new Button("✕");
+        closeBtn.getStyleClass().add("modal-close-button");
+        closeBtn.setTooltip(new Tooltip("Đóng cuộc trò chuyện (Esc)"));
+        closeBtn.setOnAction(e -> close());
+
+        topBar.getChildren().addAll(avatarLbl, titleBox, spacer, refreshBtn, closeBtn);
         root.setTop(topBar);
 
         // --- CENTER: MESSAGES CONTAINER IN SCROLL PANE ---
@@ -112,37 +116,33 @@ public class PrivateChatWindow {
         inputBar.getChildren().addAll(inputField, sendBtn);
         root.setBottom(inputBar);
 
-        Scene scene = new Scene(root, 440, 520);
-        MainApplication.applyTheme(scene);
-        stage.setScene(scene);
-        stage.setTitle("💬 Nhắn tin: " + targetDisplayName + " (@" + targetUsername + ")");
-
-        stage.setOnCloseRequest(e -> app.onPrivateChatClosed(targetUsername));
-        stage.focusedProperty().addListener((observable, wasFocused, isFocused) -> {
-            if (isFocused) app.markConversationRead(targetUsername);
-        });
-
         // Tải lịch sử tin nhắn
         requestHistory();
     }
 
     public void show() {
-        stage.show();
-        stage.toFront();
+        if (overlay == null || !overlay.isShowing()) {
+            overlay = ModalOverlay.show(app.getPrimaryStage(), contentRoot, 520, 580,
+                    () -> app.onPrivateChatClosed(targetUsername));
+            app.markConversationRead(targetUsername);
+        } else {
+            overlay.bringToFront();
+        }
         Platform.runLater(() -> inputField.requestFocus());
     }
 
     public void toFront() {
-        stage.toFront();
+        if (overlay != null) overlay.bringToFront();
         Platform.runLater(() -> inputField.requestFocus());
     }
 
-    public Stage getStage() {
-        return stage;
+    public void close() {
+        if (overlay != null) overlay.close();
+        else app.onPrivateChatClosed(targetUsername);
     }
 
     public boolean isShowing() {
-        return stage.isShowing() && stage.isFocused();
+        return overlay != null && overlay.isShowing();
     }
 
     public String getTargetUsername() {

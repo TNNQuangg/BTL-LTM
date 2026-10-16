@@ -39,10 +39,7 @@ public class DoodleDialog {
             return;
         }
 
-        Stage dialog = new Stage();
-        dialog.initStyle(StageStyle.TRANSPARENT);
-        if (owner != null) dialog.initOwner(owner);
-        dialog.initModality(Modality.APPLICATION_MODAL);
+        ModalOverlay[] dialog = new ModalOverlay[1];
 
         VBox box = new VBox(12);
         box.getStyleClass().add("doodle-dialog-box");
@@ -68,10 +65,9 @@ public class DoodleDialog {
 
         Button cancel = new Button("HỦY BỎ");
         cancel.getStyleClass().add("pencil-button-danger");
-        cancel.setOnAction(e -> {
-            dialog.close();
+        cancel.setOnAction(e -> dialog[0].close(() -> {
             if (callback != null) callback.accept(null, null);
-        });
+        }));
         Button create = new Button("TẠO PHÒNG");
         create.getStyleClass().add("pencil-button-success");
         create.setOnAction(e -> {
@@ -80,22 +76,17 @@ public class DoodleDialog {
                 error.setText("Mật khẩu phải từ 4 đến 32 ký tự.");
                 return;
             }
-            dialog.close();
-            if (callback != null) callback.accept(nameField.getText().trim(), password);
+            String roomName = nameField.getText().trim();
+            dialog[0].close(() -> {
+                if (callback != null) callback.accept(roomName, password);
+            });
         });
 
         HBox buttons = new HBox(14, cancel, create);
         buttons.setAlignment(Pos.CENTER);
         box.getChildren().addAll(title, nameLabel, nameField, passwordLabel, passwordField, hint, error, buttons);
-        StackPane root = new StackPane(box);
-        root.setPadding(new Insets(15));
-        root.setStyle("-fx-background-color: rgba(0, 0, 0, 0.4);");
-        Scene scene = new Scene(root);
-        scene.setFill(Color.TRANSPARENT);
-        MainApplication.applyTheme(scene);
-        dialog.setScene(scene);
-        dialog.setTitle("Tạo phòng");
-        dialog.showAndWait();
+        dialog[0] = ModalOverlay.show(owner, box, 520, 360, null);
+        dialog[0].waitForClose();
     }
 
     public static void password(Stage owner, String roomName, Consumer<String> callback) {
@@ -104,10 +95,7 @@ public class DoodleDialog {
             return;
         }
 
-        Stage dialog = new Stage();
-        dialog.initStyle(StageStyle.TRANSPARENT);
-        if (owner != null) dialog.initOwner(owner);
-        dialog.initModality(Modality.APPLICATION_MODAL);
+        ModalOverlay[] dialog = new ModalOverlay[1];
         VBox box = new VBox(14);
         box.getStyleClass().add("doodle-dialog-box");
         box.setAlignment(Pos.CENTER);
@@ -123,10 +111,9 @@ public class DoodleDialog {
         error.setStyle("-fx-font-family: 'Patrick Hand'; -fx-text-fill: #C62828; -fx-font-weight: bold;");
         Button cancel = new Button("HỦY BỎ");
         cancel.getStyleClass().add("pencil-button-danger");
-        cancel.setOnAction(e -> {
-            dialog.close();
+        cancel.setOnAction(e -> dialog[0].close(() -> {
             if (callback != null) callback.accept(null);
-        });
+        }));
         Button join = new Button("VÀO PHÒNG");
         join.getStyleClass().add("pencil-button-success");
         join.setOnAction(e -> {
@@ -135,23 +122,17 @@ public class DoodleDialog {
                 error.setText("Vui lòng nhập mật khẩu phòng.");
                 return;
             }
-            dialog.close();
-            if (callback != null) callback.accept(value);
+            dialog[0].close(() -> {
+                if (callback != null) callback.accept(value);
+            });
         });
         HBox buttons = new HBox(14, cancel, join);
         buttons.setAlignment(Pos.CENTER);
         box.getChildren().addAll(title, prompt, field, error, buttons);
-        StackPane root = new StackPane(box);
-        root.setPadding(new Insets(15));
-        root.setStyle("-fx-background-color: rgba(0, 0, 0, 0.4);");
-        Scene scene = new Scene(root);
-        scene.setFill(Color.TRANSPARENT);
-        MainApplication.applyTheme(scene);
-        dialog.setScene(scene);
-        dialog.setTitle("Mật khẩu phòng");
+        dialog[0] = ModalOverlay.show(owner, box, 480, 300, null);
         field.setOnAction(e -> join.fire());
         Platform.runLater(field::requestFocus);
-        dialog.showAndWait();
+        dialog[0].waitForClose();
     }
 
     public static void info(Stage owner, String title, String message) {
@@ -172,10 +153,7 @@ public class DoodleDialog {
             return;
         }
 
-        Stage dialog = new Stage();
-        dialog.initStyle(StageStyle.TRANSPARENT);
-        if (owner != null) dialog.initOwner(owner);
-        dialog.initModality(Modality.APPLICATION_MODAL);
+        ModalOverlay[] dialog = new ModalOverlay[1];
 
         VBox box = new VBox(15);
         box.getStyleClass().add("doodle-dialog-box");
@@ -195,31 +173,21 @@ public class DoodleDialog {
 
         Button cancelBtn = new Button(cancelText != null ? cancelText : "TỪ CHỐI");
         cancelBtn.getStyleClass().add("pencil-button-danger");
-        cancelBtn.setOnAction(e -> {
-            dialog.close();
+        cancelBtn.setOnAction(e -> dialog[0].close(() -> {
             if (callback != null) callback.accept(false);
-        });
+        }));
 
         Button okBtn = new Button(okText != null ? okText : "ĐỒNG Ý");
         okBtn.getStyleClass().add("pencil-button-success");
-        okBtn.setOnAction(e -> {
-            dialog.close();
+        okBtn.setOnAction(e -> dialog[0].close(() -> {
             if (callback != null) callback.accept(true);
-        });
+        }));
 
         btnBox.getChildren().addAll(cancelBtn, okBtn);
         box.getChildren().addAll(titleLbl, msgLbl, btnBox);
 
-        StackPane root = new StackPane(box);
-        root.setPadding(new Insets(15));
-        root.setStyle("-fx-background-color: rgba(0, 0, 0, 0.4);");
-
-        Scene scene = new Scene(root);
-        scene.setFill(Color.TRANSPARENT);
-        MainApplication.applyTheme(scene);
-
-        dialog.setScene(scene);
-        dialog.showAndWait();
+        dialog[0] = ModalOverlay.show(owner, box, 520, 300, null);
+        dialog[0].waitForClose();
     }
 
     public static void input(Stage owner, String title, String prompt, String defaultValue, Consumer<String> callback) {
@@ -228,10 +196,7 @@ public class DoodleDialog {
             return;
         }
 
-        Stage dialog = new Stage();
-        dialog.initStyle(StageStyle.TRANSPARENT);
-        if (owner != null) dialog.initOwner(owner);
-        dialog.initModality(Modality.APPLICATION_MODAL);
+        ModalOverlay[] dialog = new ModalOverlay[1];
 
         VBox box = new VBox(15);
         box.getStyleClass().add("doodle-dialog-box");
@@ -255,16 +220,17 @@ public class DoodleDialog {
 
         Button cancelBtn = new Button("HỦY BỎ");
         cancelBtn.getStyleClass().add("pencil-button-danger");
-        cancelBtn.setOnAction(e -> {
-            dialog.close();
+        cancelBtn.setOnAction(e -> dialog[0].close(() -> {
             if (callback != null) callback.accept(null);
-        });
+        }));
 
         Button okBtn = new Button("XÁC NHẬN");
         okBtn.getStyleClass().add("pencil-button-success");
         okBtn.setOnAction(e -> {
-            dialog.close();
-            if (callback != null) callback.accept(textField.getText().trim());
+            String value = textField.getText().trim();
+            dialog[0].close(() -> {
+                if (callback != null) callback.accept(value);
+            });
         });
 
         textField.setOnAction(e -> okBtn.fire());
@@ -272,17 +238,9 @@ public class DoodleDialog {
         btnBox.getChildren().addAll(cancelBtn, okBtn);
         box.getChildren().addAll(titleLbl, promptLbl, textField, btnBox);
 
-        StackPane root = new StackPane(box);
-        root.setPadding(new Insets(15));
-        root.setStyle("-fx-background-color: rgba(0, 0, 0, 0.4);");
-
-        Scene scene = new Scene(root);
-        scene.setFill(Color.TRANSPARENT);
-        MainApplication.applyTheme(scene);
-
-        dialog.setScene(scene);
+        dialog[0] = ModalOverlay.show(owner, box, 520, 300, null);
         Platform.runLater(textField::requestFocus);
-        dialog.showAndWait();
+        dialog[0].waitForClose();
     }
 
     private static void showCustomAlert(Stage owner, String title, String message, String okText, Runnable onClose) {
@@ -291,10 +249,7 @@ public class DoodleDialog {
             return;
         }
 
-        Stage dialog = new Stage();
-        dialog.initStyle(StageStyle.TRANSPARENT);
-        if (owner != null) dialog.initOwner(owner);
-        dialog.initModality(Modality.APPLICATION_MODAL);
+        ModalOverlay[] dialog = new ModalOverlay[1];
 
         VBox box = new VBox(15);
         box.getStyleClass().add("doodle-dialog-box");
@@ -311,23 +266,14 @@ public class DoodleDialog {
 
         Button okBtn = new Button(okText != null ? okText : "ĐỒNG Ý");
         okBtn.getStyleClass().add("pencil-button-sm");
-        okBtn.setOnAction(e -> {
-            dialog.close();
+        okBtn.setOnAction(e -> dialog[0].close(() -> {
             if (onClose != null) onClose.run();
-        });
+        }));
 
         box.getChildren().addAll(titleLbl, msgLbl, okBtn);
 
-        StackPane root = new StackPane(box);
-        root.setPadding(new Insets(15));
-        root.setStyle("-fx-background-color: rgba(0, 0, 0, 0.4);");
-
-        Scene scene = new Scene(root);
-        scene.setFill(Color.TRANSPARENT);
-        MainApplication.applyTheme(scene);
-
-        dialog.setScene(scene);
-        dialog.showAndWait();
+        dialog[0] = ModalOverlay.show(owner, box, 500, 260, null);
+        dialog[0].waitForClose();
     }
 
     /**

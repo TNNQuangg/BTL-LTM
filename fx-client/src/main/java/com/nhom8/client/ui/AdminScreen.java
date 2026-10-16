@@ -63,10 +63,13 @@ public class AdminScreen {
         Button dissolve = new Button("Giải tán phòng");
         dissolve.setOnAction(e -> {
             if (roomId.getText().isBlank()) return;
-            Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, "Giải tán phòng " + roomId.getText().trim() + "?", ButtonType.YES, ButtonType.NO);
-            if (confirm.showAndWait().orElse(ButtonType.NO) == ButtonType.YES) {
-                app.getWsClient().send(new Envelope(MessageType.ADMIN_DISSOLVE_ROOM).put("roomId", roomId.getText().trim()));
-            }
+            String selectedRoomId = roomId.getText().trim();
+            DoodleDialog.confirm(app.getPrimaryStage(), "Giải tán phòng?",
+                    "Bạn có chắc muốn giải tán phòng " + selectedRoomId + "?",
+                    "GIẢI TÁN", "HỦY", accepted -> {
+                        if (accepted) app.getWsClient().send(
+                                new Envelope(MessageType.ADMIN_DISSOLVE_ROOM).put("roomId", selectedRoomId));
+                    });
         });
         VBox roomPane = new VBox(10, rooms, new HBox(8, roomId, dissolve));
         roomPane.setPadding(new Insets(16));
