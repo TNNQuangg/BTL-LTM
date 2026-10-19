@@ -9,14 +9,17 @@ import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 
+import java.util.HashSet;
+import java.util.Set;
+
 /** Màn quản trị dùng cùng giao thức WebSocket với trò chơi. */
 public class AdminScreen {
     private final MainApplication app;
     private Scene scene;
     private final ListView<String> users = new ListView<>();
     private final ListView<String> rooms = new ListView<>();
-    private final ListView<String> builtInTopics = new ListView<>();
     private final ListView<String> topics = new ListView<>();
+    private final Set<String> builtInTopicWords = new HashSet<>();
     private final Label stats = new Label("Đang tải thống kê...");
     private final Label status = new Label("");
 
@@ -85,22 +88,30 @@ public class AdminScreen {
         Button delete = new Button("Xóa từ được chọn");
         delete.setOnAction(e -> {
             String selected = topics.getSelectionModel().getSelectedItem();
-            if (selected != null) app.getWsClient().send(new Envelope(MessageType.ADMIN_TOPIC_DELETE).put("word", selected));
+            if (selected != null) app.getWsClient().send(new Envelope(MessageType.ADMIN_TOPIC_DELETE)
+                    .put("word", selected).put("builtIn", containsIgnoreCase(builtInTopicWords, selected)));
         });
-        builtInTopics.setPlaceholder(new Label("Không có từ khóa mặc định."));
-        topics.setPlaceholder(new Label("Chưa có từ khóa tự thêm."));
-
-        VBox builtInPane = new VBox(8, new Label("Kho từ khóa mặc định · chỉ xem"), builtInTopics);
-        VBox.setVgrow(builtInTopics, Priority.ALWAYS);
-        VBox customPane = new VBox(8, new Label("Từ khóa tự thêm · dùng trong các trận tiếp theo"), topics,
-                new HBox(8, word, add, delete));
+        Button edit = new Button("Sửa từ được chọn");
+        edit.setOnAction(e -> {
+            String selected = topics.getSelectionModel().getSelectedItem();
+            if (selected == null) return;
+            TextInputDialog dialog = new TextInputDialog(selected);
+            dialog.initOwner(app.getPrimaryStage());
+            dialog.setTitle("Sửa từ khóa");
+            dialog.setHeaderText("Nhập từ khóa mới");
+            dialog.setContentText("Từ khóa:");
+            dialog.showAndWait().ifPresent(replacement -> app.getWsClient().send(
+                    new Envelope(MessageType.ADMIN_TOPIC_UPDATE)
+                            .put("word", selected).put("replacement", replacement)));
+        });
+        topics.setPlaceholder(new Label("Chưa có từ khóa."));
+        VBox customPane = new VBox(8, new Label("Tất cả từ khóa dùng trong trận"), topics,
+                new HBox(8, word, add, edit, delete));
         HBox.setHgrow(word, Priority.ALWAYS);
         VBox.setVgrow(topics, Priority.ALWAYS);
-        SplitPane topicLists = new SplitPane(builtInPane, customPane);
-        topicLists.setDividerPositions(0.5);
-        VBox topicPane = new VBox(10, new Label("Kho từ khóa dùng để tạo lựa chọn trong trận."), topicLists);
+        VBox topicPane = new VBox(10, new Label("Từ khóa mặc định và từ khóa tự thêm được trộn chung."), customPane);
         topicPane.setPadding(new Insets(16));
-        VBox.setVgrow(topicLists, Priority.ALWAYS);
+        VBox.setVgrow(customPane, Priority.ALWAYS);
         tabs.getTabs().add(new Tab("Từ khóa", topicPane));
 
         root.setCenter(tabs);
@@ -136,14 +147,26 @@ public class AdminScreen {
                         + "  |  " + r.path("status").asText()));
             }
             case ADMIN_TOPICS -> {
-                builtInTopics.getItems().clear();
-                data.path("builtInTopics").forEach(t -> builtInTopics.getItems().add(t.asText()));
+                builtInTopicWords.clear();
+                data.path("builtInTopics").forEach(t -> builtInTopicWords.add(t.asText()));
                 topics.getItems().clear();
-                data.path("topics").forEach(t -> topics.getItems().add(t.asText()));
+                Set<String> seen = new HashSet<>();
+                builtInTopicWords.stream().sorted(String.CASE_INSENSITIVE_ORDER)
+                        .filter(topic -> seen.add(topic.toLowerCase(java.util.Locale.ROOT)))
+                        .forEach(topics.getItems()::add);
+                data.path("topics").forEach(t -> {
+                    String topic = t.asText();
+                    if (seen.add(topic.toLowerCase(java.util.Locale.ROOT))) topics.getItems().add(topic);
+                });
+                topics.getItems().sort(String.CASE_INSENSITIVE_ORDER);
             }
             case ADMIN_DISSOLVE_ROOM -> status.setText(env.getContent());
-            case ADMIN_TOPIC_ADD, ADMIN_TOPIC_DELETE -> status.setText(env.getContent());
+            case ADMIN_TOPIC_ADD, ADMIN_TOPIC_DELETE, ADMIN_TOPIC_UPDATE -> status.setText(env.getContent());
             default -> {}
         }
+    }
+
+    private boolean containsIgnoreCase(Set<String> values, String target) {
+        return values.stream().anyMatch(value -> value.equalsIgnoreCase(target));
     }
 }

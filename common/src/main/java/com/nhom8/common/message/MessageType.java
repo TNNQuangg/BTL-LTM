@@ -145,6 +145,7 @@ public enum MessageType {
     ADMIN_TOPICS,
     ADMIN_TOPIC_ADD,
     ADMIN_TOPIC_DELETE,
+    ADMIN_TOPIC_UPDATE,
 
     // === Lỗi chung ===
     ERROR

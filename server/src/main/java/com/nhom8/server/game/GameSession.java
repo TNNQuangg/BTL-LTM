@@ -522,24 +522,24 @@ public class GameSession {
      *    real-time cho cả phòng, không chờ hết giờ.
      */
     public void onGuessSubmitted(String username, String guess) {
-        if (!gameActive) return;
-
-        String painterUsername = playerOrder.get(currentPaintingIndex);
-
-        // Người vẽ không được đoán tranh của mình
-        if (username.equals(painterUsername)) return;
-
-        // Đã đoán đúng rồi thì không nhận thêm đáp án
-        if (correctGuessers.contains(username)) return;
-
         // === CRITICAL SECTION: synchronized để đảm bảo thứ tự tuyệt đối ===
         // Giống consumer trong RabbitMQ — chỉ 1 message được xử lý tại 1 thời điểm
         GuessResult result;
+        String painterUsername;
         boolean isCorrect;
         int currentRank = 0;
         int earnedPoints = 0;
 
         synchronized (guessLock) {
+            if (!gameActive || currentPaintingIndex < 0 || currentPaintingIndex >= playerOrder.size()) return;
+            painterUsername = playerOrder.get(currentPaintingIndex);
+
+            // Người vẽ không được đoán tranh của mình
+            if (username.equals(painterUsername)) return;
+
+            // Đã đoán đúng rồi thì không nhận thêm đáp án
+            if (correctGuessers.contains(username)) return;
+
             // Ghi nhận thời gian chính xác bằng nanoTime
             long elapsedNanos = System.nanoTime() - guessStartNanoTime;
 

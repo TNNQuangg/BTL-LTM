@@ -8,7 +8,9 @@ import com.nhom8.server.game.RoomManager;
 import com.nhom8.server.model.Friendship;
 import com.nhom8.server.model.User;
 import com.nhom8.server.model.CustomTopic;
+import com.nhom8.server.model.BuiltInTopicOverride;
 import com.nhom8.server.repository.CustomTopicRepository;
+import com.nhom8.server.repository.BuiltInTopicOverrideRepository;
 import com.nhom8.server.util.TopicPool;
 import com.nhom8.common.message.Envelope;
 import com.nhom8.common.message.MessageType;
@@ -58,13 +60,33 @@ public class GameService {
     @org.springframework.beans.factory.annotation.Autowired
     private CustomTopicRepository customTopicRepository;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private BuiltInTopicOverrideRepository builtInTopicOverrideRepository;
+
     @jakarta.annotation.PostConstruct
     public void loadCustomTopics() {
         refreshCustomTopics();
+        refreshBuiltInTopics();
     }
 
     private void refreshCustomTopics() {
         TopicPool.setCustomTopics(customTopicRepository.findAll().stream().map(CustomTopic::getWord).toList());
+    }
+
+    private void refreshBuiltInTopics() {
+        Map<String, String> replacements = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        builtInTopicOverrideRepository.findAll().forEach(override ->
+                replacements.put(override.getOriginalWord(), override.getReplacementWord()));
+        List<String> effective = new ArrayList<>();
+        for (String sourceWord : TopicPool.getSourceBuiltInTopics()) {
+            if (!replacements.containsKey(sourceWord)) {
+                effective.add(sourceWord);
+            } else {
+                String replacement = replacements.get(sourceWord);
+                if (replacement != null && !replacement.isBlank()) effective.add(replacement);
+            }
+        }
+        TopicPool.setBuiltInTopics(effective);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -725,7 +747,12 @@ public class GameService {
         if (!requireAdmin(handler, MessageType.ADMIN_TOPIC_ADD)) return;
         String word = request.getString("word");
         word = word == null ? "" : word.trim().replaceAll("\\s+", " ");
-        if (word.length() < 2 || word.length() > 100 || customTopicRepository.existsByWordIgnoreCase(word)) {
+        String normalizedWord = word;
+        boolean duplicateBuiltIn = java.util.stream.Stream.concat(
+                        TopicPool.getBuiltInTopics().stream(), TopicPool.getSourceBuiltInTopics().stream())
+                .anyMatch(topic -> topic.equalsIgnoreCase(normalizedWord));
+        if (word.length() < 2 || word.length() > 100 || duplicateBuiltIn
+                || customTopicRepository.existsByWordIgnoreCase(word)) {
             handler.sendMessage(Envelope.error(MessageType.ADMIN_TOPIC_ADD, "Từ khóa phải dài 2–100 ký tự và chưa tồn tại."));
             return;
         }
@@ -739,6 +766,20 @@ public class GameService {
     public void handleAdminTopicDelete(ClientSession handler, Envelope request) {
         if (!requireAdmin(handler, MessageType.ADMIN_TOPIC_DELETE)) return;
         String word = request.getString("word");
+        if (request.getBoolean("builtIn", false)) {
+            BuiltInTopicOverride override = findBuiltInOverrideForCurrentWord(word);
+            if (override == null) {
+                handler.sendMessage(Envelope.error(MessageType.ADMIN_TOPIC_DELETE, "Không tìm thấy từ khóa mặc định."));
+                return;
+            }
+            override.setReplacementWord(null);
+            builtInTopicOverrideRepository.save(override);
+            refreshBuiltInTopics();
+            handler.sendMessage(Envelope.success(MessageType.ADMIN_TOPIC_DELETE, "Đã xóa từ khóa mặc định: " + word));
+            broadcastAdminTopics();
+            broadcastAdminStats();
+            return;
+        }
         CustomTopic topic = customTopicRepository.findAll().stream()
                 .filter(t -> t.getWord().equalsIgnoreCase(word)).findFirst().orElse(null);
         if (topic == null) {
@@ -750,6 +791,71 @@ public class GameService {
         handler.sendMessage(Envelope.success(MessageType.ADMIN_TOPIC_DELETE, "Đã xóa từ khóa: " + topic.getWord()));
         broadcastAdminTopics();
         broadcastAdminStats();
+    }
+
+    public void handleAdminTopicUpdate(ClientSession handler, Envelope request) {
+        if (!requireAdmin(handler, MessageType.ADMIN_TOPIC_UPDATE)) return;
+        String currentWord = request.getString("word");
+        String rawReplacement = request.getString("replacement");
+        String replacement = rawReplacement == null ? "" : rawReplacement.trim().replaceAll("\\s+", " ");
+        if (replacement.length() < 2 || replacement.length() > 100) {
+            handler.sendMessage(Envelope.error(MessageType.ADMIN_TOPIC_UPDATE, "Từ khóa phải dài 2–100 ký tự."));
+            return;
+        }
+        BuiltInTopicOverride override = findBuiltInOverrideForCurrentWord(currentWord);
+        CustomTopic customTopic = override == null
+                ? customTopicRepository.findAll().stream()
+                        .filter(topic -> topic.getWord().equalsIgnoreCase(currentWord))
+                        .findFirst().orElse(null)
+                : null;
+        if (override == null && customTopic == null) {
+            handler.sendMessage(Envelope.error(MessageType.ADMIN_TOPIC_UPDATE, "Không tìm thấy từ khóa."));
+            return;
+        }
+        boolean duplicateBuiltIn = TopicPool.getBuiltInTopics().stream()
+                .anyMatch(topic -> !topic.equalsIgnoreCase(currentWord) && topic.equalsIgnoreCase(replacement));
+        boolean duplicateCustom = customTopicRepository.findAll().stream()
+                .anyMatch(topic -> !topic.getWord().equalsIgnoreCase(currentWord)
+                        && topic.getWord().equalsIgnoreCase(replacement));
+        if (duplicateBuiltIn || duplicateCustom) {
+            handler.sendMessage(Envelope.error(MessageType.ADMIN_TOPIC_UPDATE, "Từ khóa này đã tồn tại."));
+            return;
+        }
+
+        if (customTopic != null) {
+            String oldWord = customTopic.getWord();
+            if (!replacement.equalsIgnoreCase(oldWord)) {
+                customTopicRepository.delete(customTopic);
+                customTopicRepository.save(new CustomTopic(replacement));
+                refreshCustomTopics();
+            }
+            handler.sendMessage(Envelope.success(MessageType.ADMIN_TOPIC_UPDATE, "Đã sửa từ khóa thành: " + replacement));
+        } else {
+            String originalWord = override.getOriginalWord();
+            if (replacement.equalsIgnoreCase(originalWord)) {
+                builtInTopicOverrideRepository.delete(override);
+                handler.sendMessage(Envelope.success(MessageType.ADMIN_TOPIC_UPDATE, "Đã khôi phục từ khóa mặc định: " + originalWord));
+            } else {
+                override.setReplacementWord(replacement);
+                builtInTopicOverrideRepository.save(override);
+                handler.sendMessage(Envelope.success(MessageType.ADMIN_TOPIC_UPDATE, "Đã sửa từ khóa thành: " + replacement));
+            }
+            refreshBuiltInTopics();
+        }
+        broadcastAdminTopics();
+    }
+
+    private BuiltInTopicOverride findBuiltInOverrideForCurrentWord(String word) {
+        if (word == null) return null;
+        return builtInTopicOverrideRepository.findAll().stream()
+                .filter(override -> word.equalsIgnoreCase(override.getReplacementWord())
+                        || (override.getReplacementWord() == null
+                        && word.equalsIgnoreCase(override.getOriginalWord())))
+                .findFirst()
+                .orElseGet(() -> TopicPool.getSourceBuiltInTopics().stream()
+                        .filter(source -> source.equalsIgnoreCase(word))
+                        .map(source -> new BuiltInTopicOverride(source, source))
+                        .findFirst().orElse(null));
     }
 
     // ========================================================================

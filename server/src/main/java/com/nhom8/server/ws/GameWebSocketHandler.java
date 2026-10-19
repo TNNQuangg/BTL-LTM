@@ -226,6 +226,9 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
             case ADMIN_TOPIC_DELETE:
                 gameService.handleAdminTopicDelete(handler, envelope);
                 break;
+            case ADMIN_TOPIC_UPDATE:
+                gameService.handleAdminTopicUpdate(handler, envelope);
+                break;
             default:
                 System.out.println("[SERVER] Chưa hỗ trợ loại thông điệp: " + envelope.getType());
                 break;

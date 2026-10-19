@@ -9,6 +9,7 @@ import com.nhom8.common.message.Envelope;
 import com.nhom8.common.message.MessageType;
 import javafx.animation.PauseTransition;
 import javafx.animation.FadeTransition;
+import javafx.animation.ScaleTransition;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -45,6 +46,8 @@ public class GameScreen {
     private String mySelectedTopic = "";
     private int currentRound = 1;
     private int maxRounds = 4;
+    private int lastTimerSecond = -1;
+    private String lastTimerPhase = "";
 
     // Bộ nhớ vẽ tranh của bản thân
     private final List<StrokeDTO> myStrokes = new ArrayList<>();
@@ -175,8 +178,41 @@ public class GameScreen {
         toolbar.setMaxWidth(Double.MAX_VALUE);
         toolbar.setStyle("-fx-background-color: white; -fx-border-color: -fx-ink; -fx-border-width: 2;");
 
-        ColorPicker colorPicker = new ColorPicker(Color.BLACK);
-        colorPicker.setStyle("-fx-cursor: hand;");
+        FlowPane colorPalette = new FlowPane(5, 5);
+        colorPalette.setAlignment(Pos.CENTER_LEFT);
+        colorPalette.setMaxWidth(330);
+        List<Color> paletteColors = List.of(
+                Color.web("#000000"), Color.web("#6C757D"), Color.web("#5C4033"),
+                Color.web("#8B1E3F"), Color.web("#D62828"), Color.web("#F77F00"),
+                Color.web("#F2C14E"), Color.web("#6A994E"), Color.web("#2A9D8F"),
+                Color.web("#00A6A6"), Color.web("#277DA1"), Color.web("#4361EE"),
+                Color.web("#3A0CA3"), Color.web("#7209B7"), Color.web("#B5179E"),
+                Color.web("#F15BB5")
+        );
+        List<Button> colorButtons = new ArrayList<>();
+        for (Color paletteColor : paletteColors) {
+            Button swatch = new Button();
+            swatch.setMinSize(22, 22);
+            swatch.setPrefSize(22, 22);
+            swatch.setMaxSize(22, 22);
+            swatch.setFocusTraversable(false);
+            swatch.setTooltip(new Tooltip(toHexString(paletteColor)));
+            colorButtons.add(swatch);
+            colorPalette.getChildren().add(swatch);
+        }
+        Runnable refreshPaletteSelection = () -> {
+            for (int i = 0; i < colorButtons.size(); i++) {
+                Button swatch = colorButtons.get(i);
+                Color swatchColor = paletteColors.get(i);
+                String borderColor = swatchColor.equals(currentColor) ? "#171717" : "#FFFFFF";
+                String borderWidth = swatchColor.equals(currentColor) ? "3" : "1";
+                swatch.setStyle("-fx-background-color: " + toHexString(swatchColor)
+                        + "; -fx-background-radius: 4; -fx-border-color: " + borderColor
+                        + "; -fx-border-width: " + borderWidth
+                        + "; -fx-border-radius: 4; -fx-cursor: hand;");
+            }
+        };
+        refreshPaletteSelection.run();
 
         Slider widthSlider = new Slider(1, 25, 3);
         widthSlider.setPrefWidth(100);
@@ -188,12 +224,15 @@ public class GameScreen {
             eraserSelected = !eraserSelected;
             eraserBtn.setText(eraserSelected ? "✎ Bút vẽ" : "⌫ Tẩy");
         });
-        colorPicker.setOnAction(e -> {
-            currentColor = colorPicker.getValue();
-            eraserSelected = false;
-            eraserBtn.setText("⌫ Tẩy");
-        });
-
+        for (int i = 0; i < colorButtons.size(); i++) {
+            Color paletteColor = paletteColors.get(i);
+            colorButtons.get(i).setOnAction(e -> {
+                currentColor = paletteColor;
+                eraserSelected = false;
+                eraserBtn.setText("⌫ Tẩy");
+                refreshPaletteSelection.run();
+            });
+        }
         Button clearBtn = new Button("🗑 Xóa bảng");
         clearBtn.getStyleClass().add("pencil-button-sm");
         clearBtn.setOnAction(e -> clearCanvas());
@@ -203,7 +242,7 @@ public class GameScreen {
         submitDrawingBtn.setOnAction(e -> submitMyDrawing());
 
         toolbar.getChildren().addAll(
-                new Label("Màu:"), colorPicker,
+                new Label("Màu:"), colorPalette,
                 new Label("Cỡ bút:"), widthSlider, eraserBtn,
                 clearBtn,
                 submitDrawingBtn
@@ -630,6 +669,7 @@ public class GameScreen {
         roundResultBox.setVisible(false);
         isDrawingPhase = true;
         isGuessingPhase = false;
+        GameSound.playPhaseStart();
         hasSubmittedDrawing = false;
         myStrokes.clear();
         currentXPoints.clear();
@@ -670,6 +710,7 @@ public class GameScreen {
 
         isDrawingPhase = false;
         isGuessingPhase = true;
+        GameSound.playPhaseStart();
         toolbar.setVisible(false);
         guessFeedbackLabel.setText("");
 
@@ -761,6 +802,7 @@ public class GameScreen {
     private void onGuessResult(Envelope env) {
         boolean correct = env.getBoolean("correct", false);
         if (correct) {
+            GameSound.playCorrect();
             int rank = env.getInt("rank", 1);
             int points = env.getInt("points", 0);
             guessFeedbackLabel.setText("🎉 CHÍNH XÁC! Hạng #" + rank + " (+" + points + " điểm)");
@@ -777,6 +819,7 @@ public class GameScreen {
             if (rankings.size() > 0) {
                 JsonNode latest = rankings.get(rankings.size() - 1);
                 String u = latest.has("username") ? latest.get("username").asText() : "";
+                if (!u.equalsIgnoreCase(app.getCurrentUsername())) GameSound.playRoomCorrect();
                 int pts = latest.has("points") ? latest.get("points").asInt() : 0;
                 int r = latest.has("rank") ? latest.get("rank").asInt() : 1;
                 appendChatMessage("🏆 " + u + " đã đoán đúng hạng #" + r + " (+" + pts + " đ)");
@@ -798,6 +841,8 @@ public class GameScreen {
         int correctCount = env.getInt("correctCount", 0);
         int total = env.getInt("totalGuessers", 0);
         boolean earlyFinish = env.getBoolean("earlyFinish", false) || (total > 0 && correctCount == total);
+
+        if (!earlyFinish) GameSound.playTimeout();
 
         if (earlyFinish) {
             roundResultTitle.setText("🎉 Đã có người đoán đúng! Đáp án: " + topic);
@@ -956,6 +1001,33 @@ public class GameScreen {
         int remaining = env.getInt("remaining", 0);
         String phase = env.getString("phase");
         timerLabel.setText("⏱ " + remaining + "s");
+
+        if (phase == null) phase = "";
+        if (!phase.equals(lastTimerPhase)) {
+            lastTimerPhase = phase;
+            lastTimerSecond = -1;
+        }
+        if (remaining != lastTimerSecond && remaining >= 1 && remaining <= 10
+                && ("DRAWING".equals(phase) || "GUESSING".equals(phase))) {
+            GameSound.playCountdownTick(remaining);
+        }
+        lastTimerSecond = remaining;
+
+        if (remaining <= 5 && ("DRAWING".equals(phase) || "GUESSING".equals(phase))) {
+            timerLabel.setStyle("-fx-font-family: 'Amatic SC'; -fx-font-size: 30px; -fx-font-weight: bold; -fx-text-fill: white; -fx-background-color: #C92A2A; -fx-padding: 2 14; -fx-border-color: white; -fx-border-width: 2;");
+            ScaleTransition pulse = new ScaleTransition(Duration.millis(180), timerLabel);
+            pulse.setFromX(1.0);
+            pulse.setFromY(1.0);
+            pulse.setToX(1.12);
+            pulse.setToY(1.12);
+            pulse.setAutoReverse(true);
+            pulse.setCycleCount(2);
+            pulse.playFromStart();
+        } else {
+            timerLabel.setStyle("-fx-font-family: 'Amatic SC'; -fx-font-size: 28px; -fx-font-weight: bold; -fx-text-fill: white; -fx-background-color: -fx-ink; -fx-padding: 2 14; -fx-border-color: white; -fx-border-width: 2;");
+            timerLabel.setScaleX(1.0);
+            timerLabel.setScaleY(1.0);
+        }
 
         if ("TOPIC_SELECT".equals(phase) && topicSelectionBox.isVisible()) {
             topicTimerLabel.setText("Thời gian còn lại: " + remaining + "s");

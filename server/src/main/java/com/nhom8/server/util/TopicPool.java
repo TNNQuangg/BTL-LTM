@@ -11,7 +11,12 @@ import java.util.List;
 public class TopicPool {
 
     private static final List<String> ALL_TOPICS = new ArrayList<>();
+    private static volatile List<String> builtInTopics = List.of();
     private static volatile List<String> customTopics = List.of();
+
+    public static void setBuiltInTopics(List<String> topics) {
+        builtInTopics = List.copyOf(topics);
+    }
 
     public static void setCustomTopics(List<String> topics) {
         customTopics = List.copyOf(topics);
@@ -47,15 +52,20 @@ public class TopicPool {
         Collections.addAll(ALL_TOPICS, dongVat);
         Collections.addAll(ALL_TOPICS, thienNhien);
         Collections.addAll(ALL_TOPICS, vanHoa);
+        builtInTopics = List.copyOf(ALL_TOPICS);
     }
 
     public static List<String> getBuiltInTopics() {
+        return builtInTopics;
+    }
+
+    public static List<String> getSourceBuiltInTopics() {
         return List.copyOf(ALL_TOPICS);
     }
 
     public static List<List<String>> getTopicOptionsForRoom(int playerCount) {
         int requiredTopics = playerCount * 3;
-        List<String> available = new ArrayList<>(ALL_TOPICS);
+        List<String> available = new ArrayList<>(builtInTopics);
         available.addAll(customTopics);
         List<String> poolCopy = new ArrayList<>(available);
         Collections.shuffle(poolCopy);

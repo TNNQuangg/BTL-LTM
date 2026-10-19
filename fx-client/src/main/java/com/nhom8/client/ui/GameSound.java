@@ -1,0 +1,101 @@
+package com.nhom8.client.ui;
+
+import javax.sound.sampled.AudioFormat;
+import javax.sound.sampled.AudioInputStream;
+import javax.sound.sampled.AudioSystem;
+import javax.sound.sampled.Clip;
+import javax.sound.sampled.FloatControl;
+import java.io.ByteArrayInputStream;
+import java.util.concurrent.CompletableFuture;
+
+/** Short synthesized game sounds, so the client does not depend on external audio files. */
+public final class GameSound {
+    private static final float SAMPLE_RATE = 22_050f;
+    private static volatile boolean initialized;
+    private static Clip tick;
+    private static Clip urgentTick;
+    private static Clip correct;
+    private static Clip correctForRoom;
+    private static Clip phaseStart;
+    private static Clip timeout;
+
+    private GameSound() { }
+
+    public static void playCountdownTick(int secondsLeft) {
+        play(secondsLeft <= 3 ? 1 : 0);
+    }
+
+    public static void playCorrect() { play(2); }
+    public static void playRoomCorrect() { play(3); }
+    public static void playPhaseStart() { play(4); }
+    public static void playTimeout() { play(5); }
+
+    private static void play(int sound) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                initialize();
+                Clip clip = switch (sound) {
+                    case 1 -> urgentTick;
+                    case 2 -> correct;
+                    case 3 -> correctForRoom;
+                    case 4 -> phaseStart;
+                    case 5 -> timeout;
+                    default -> tick;
+                };
+                if (clip != null) {
+                    if (clip.isRunning()) clip.stop();
+                    clip.setFramePosition(0);
+                    clip.start();
+                }
+            } catch (Throwable ignored) {
+                // Audio output is optional; game actions continue if audio is unavailable.
+            }
+        });
+    }
+
+    private static synchronized void initialize() throws Exception {
+        if (initialized) return;
+        tick = tone(new double[]{1_050}, new int[]{58}, 0.24);
+        urgentTick = tone(new double[]{1_420}, new int[]{76}, 0.34);
+        correct = tone(new double[]{660, 880, 1_100, 1_320}, new int[]{105, 105, 120, 230}, 0.42);
+        correctForRoom = tone(new double[]{740, 990}, new int[]{85, 140}, 0.24);
+        phaseStart = tone(new double[]{520, 780}, new int[]{95, 145}, 0.27);
+        timeout = tone(new double[]{660, 440, 300}, new int[]{130, 150, 220}, 0.30);
+        initialized = true;
+    }
+
+    private static Clip tone(double[] frequencies, int[] durationsMs, double volume) throws Exception {
+        int totalFrames = 0;
+        for (int duration : durationsMs) totalFrames += (int) (SAMPLE_RATE * duration / 1_000.0);
+        totalFrames += Math.max(0, frequencies.length - 1) * (int) (SAMPLE_RATE * 0.018);
+        byte[] pcm = new byte[totalFrames * 2];
+        int frame = 0;
+        for (int note = 0; note < frequencies.length; note++) {
+            int frames = (int) (SAMPLE_RATE * durationsMs[note] / 1_000.0);
+            for (int i = 0; i < frames; i++, frame++) {
+                double progress = (double) i / frames;
+                double attack = Math.min(1.0, i / (SAMPLE_RATE * 0.008));
+                double decay = Math.pow(1.0 - progress, 1.6);
+                double envelope = attack * decay;
+                double fundamental = Math.sin(2.0 * Math.PI * frequencies[note] * i / SAMPLE_RATE);
+                double overtone = Math.sin(4.0 * Math.PI * frequencies[note] * i / SAMPLE_RATE) * 0.18;
+                short value = (short) ((fundamental + overtone) * envelope * volume * Short.MAX_VALUE);
+                pcm[frame * 2] = (byte) (value & 0xff);
+                pcm[frame * 2 + 1] = (byte) ((value >>> 8) & 0xff);
+            }
+            if (note < frequencies.length - 1) frame += (int) (SAMPLE_RATE * 0.018);
+        }
+
+        AudioFormat format = new AudioFormat(SAMPLE_RATE, 16, 1, true, false);
+        try (AudioInputStream input = new AudioInputStream(
+                new ByteArrayInputStream(pcm), format, totalFrames)) {
+            Clip clip = AudioSystem.getClip();
+            clip.open(input);
+            if (clip.isControlSupported(FloatControl.Type.MASTER_GAIN)) {
+                FloatControl gain = (FloatControl) clip.getControl(FloatControl.Type.MASTER_GAIN);
+                gain.setValue(Math.min(0.0f, gain.getMaximum()));
+            }
+            return clip;
+        }
+    }
+}
