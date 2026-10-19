@@ -157,12 +157,7 @@ public class LobbyScreen {
 
         Button logoutBtn = new Button("Đăng xuất");
         logoutBtn.getStyleClass().add("pencil-button-sm");
-        logoutBtn.setOnAction(e -> {
-            if (app.getWsClient() != null) {
-                app.getWsClient().close();
-            }
-            app.start(app.getPrimaryStage());
-        });
+        logoutBtn.setOnAction(e -> app.returnToLogin(null));
 
         topBar.getChildren().addAll(brandLabel, spacer, welcomeLabel, profileBtn);
         if (app.isAdmin()) {

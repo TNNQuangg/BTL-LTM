@@ -334,7 +334,8 @@ public class GameService {
         if (room == null || !room.getHostUsername().equalsIgnoreCase(handler.getUsername())) return;
 
         if (request.getData() != null && request.getData().has("maxRounds")) {
-            room.setMaxRounds(request.getInt("maxRounds", room.getMaxRounds()));
+            int requestedRounds = request.getInt("maxRounds", room.getMaxRounds());
+            room.setMaxRounds(Math.max(1, Math.min(12, requestedRounds)));
         }
         if (request.getData() != null && request.getData().has("drawTime")) {
             room.setDrawTime(request.getInt("drawTime", room.getDrawTime()));
@@ -383,6 +384,14 @@ public class GameService {
 
         String content = request.get("content");
         if (content == null || content.trim().isEmpty()) return;
+
+        if (room.isPlaying() && room.getGameSession().containsSecretAnswer(content)) {
+            Envelope hiddenNotice = new Envelope(MessageType.ROOM_CHAT_RECEIVE);
+            hiddenNotice.put("senderDisplayName", "Hệ thống");
+            hiddenNotice.put("content", "Tin nhắn đã bị ẩn vì có chứa từ khóa của bức tranh.");
+            handler.sendMessage(hiddenNotice);
+            return;
+        }
 
         Envelope chatMsg = new Envelope(MessageType.ROOM_CHAT_RECEIVE);
         chatMsg.put("senderUsername", handler.getUsername());
@@ -698,7 +707,8 @@ public class GameService {
 
     private void broadcastAdminTopics() {
         Envelope response = Envelope.success(MessageType.ADMIN_TOPICS, "Từ khóa tự thêm")
-                .put("topics", customTopicRepository.findAll().stream().map(CustomTopic::getWord).sorted().toList());
+                .put("topics", customTopicRepository.findAll().stream().map(CustomTopic::getWord).sorted().toList())
+                .put("builtInTopics", TopicPool.getBuiltInTopics().stream().sorted().toList());
         for (ClientSession session : onlineClients.values()) {
             if (isAdmin(session)) session.sendMessage(response);
         }
@@ -707,7 +717,8 @@ public class GameService {
     public void handleAdminTopics(ClientSession handler) {
         if (!requireAdmin(handler, MessageType.ADMIN_TOPICS)) return;
         handler.sendMessage(Envelope.success(MessageType.ADMIN_TOPICS, "Từ khóa tự thêm")
-                .put("topics", customTopicRepository.findAll().stream().map(CustomTopic::getWord).sorted().toList()));
+                .put("topics", customTopicRepository.findAll().stream().map(CustomTopic::getWord).sorted().toList())
+                .put("builtInTopics", TopicPool.getBuiltInTopics().stream().sorted().toList()));
     }
 
     public void handleAdminTopicAdd(ClientSession handler, Envelope request) {

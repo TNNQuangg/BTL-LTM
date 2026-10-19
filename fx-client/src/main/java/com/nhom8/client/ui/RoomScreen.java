@@ -195,7 +195,7 @@ public class RoomScreen {
         Label roundsLbl = new Label("Số vòng:");
         roundsLbl.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-weight: bold; -fx-text-fill: -fx-ink; -fx-font-size: 15px;");
         roundsCombo = new ComboBox<>();
-        roundsCombo.getItems().addAll(4, 8, 12);
+        roundsCombo.getItems().addAll(1, 4, 8, 12);
         roundsCombo.setValue(4);
         roundsCombo.setDisable(true);
 
@@ -587,7 +587,7 @@ public class RoomScreen {
                     break;
                 case GAME_START:
                 case MATCH_START:
-                    app.showGameScreen(roomId);
+                    app.showGameScreen(roomId, env);
                     break;
                 case ROOM_DISSOLVED:
                     DoodleDialog.info(app.getPrimaryStage(), "Phòng giải tán",

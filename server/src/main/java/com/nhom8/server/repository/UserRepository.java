@@ -40,6 +40,7 @@ public interface UserRepository extends JpaRepository<User, Integer> {
 
     /** Cập nhật điểm hạng tích lũy cho người chơi. */
     @Modifying
+    @org.springframework.transaction.annotation.Transactional
     @Query("UPDATE User u SET u.rankingScore = u.rankingScore + :points WHERE u.userId = :userId")
     void addRankingScore(@Param("userId") Integer userId, @Param("points") int points);
 }

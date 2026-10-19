@@ -28,6 +28,9 @@ import com.nhom8.server.ws.ClientSession;
  */
 public class GameSession {
 
+    /** Điểm phạt/cộng khi một người chơi rời trận giữa chừng. */
+    private static final int FORFEIT_POINTS = 20;
+
     /** Thời gian chọn chủ đề (mili-giây) */
     private static final int TOPIC_SELECT_TIME = 10_000;
 
@@ -183,6 +186,7 @@ public class GameSession {
         startMsg.put("playerOrder", new ArrayList<>(playerOrder));
         startMsg.put("currentRound", currentRound);
         startMsg.put("maxRounds", room.getMaxRounds());
+        startMsg.put("scores", buildCurrentScores());
         room.broadcast(startMsg);
 
         // Bắt đầu vòng 1
@@ -660,7 +664,25 @@ public class GameSession {
         rankingMsg.put("rankings", rankingList);
         rankingMsg.put("correctCount", rankingList.size());
         rankingMsg.put("totalGuessers", playerOrder.size() - 1);
+        rankingMsg.put("scores", buildCurrentScores());
         room.broadcast(rankingMsg);
+    }
+
+    private ArrayList<HashMap<String, Object>> buildCurrentScores() {
+        ArrayList<HashMap<String, Object>> scores = new ArrayList<>();
+        for (String username : playerOrder) {
+            MatchResult result = matchResults.get(username);
+            ClientSession player = room.getPlayer(username);
+            HashMap<String, Object> entry = new HashMap<>();
+            entry.put("username", username);
+            entry.put("displayName", player != null && player.getDisplayName() != null
+                    ? player.getDisplayName() : username);
+            entry.put("totalPoints", result != null ? result.getTotalPoints() : 0);
+            entry.put("pointsDrawn", result != null ? result.getPointsDrawn() : 0);
+            entry.put("pointsGuess", result != null ? result.getPointsGuess() : 0);
+            scores.add(entry);
+        }
+        return scores;
     }
 
     /**
@@ -725,17 +747,7 @@ public class GameSession {
         roundResult.put("isLastRound", isLastRound);
 
         // Bổ sung bảng điểm tổng lũy kế thời gian thực của mọi người chơi
-        ArrayList<HashMap<String, Object>> currentScores = new ArrayList<>();
-        for (String u : playerOrder) {
-            MatchResult mr = matchResults.get(u);
-            HashMap<String, Object> sc = new HashMap<>();
-            sc.put("username", u);
-            sc.put("totalPoints", mr != null ? mr.getTotalPoints() : 0);
-            sc.put("pointsDrawn", mr != null ? mr.getPointsDrawn() : 0);
-            sc.put("pointsGuess", mr != null ? mr.getPointsGuess() : 0);
-            currentScores.add(sc);
-        }
-        roundResult.put("scores", currentScores);
+        roundResult.put("scores", buildCurrentScores());
 
         List<GuessResult> results = guessResults.get(painterUsername);
         ArrayList<HashMap<String, Object>> guessDetailsList = new ArrayList<>();
@@ -917,6 +929,8 @@ public class GameSession {
         if (!gameActive || username == null) return;
         System.out.println("[GameSession] Người chơi out giữa chừng: " + username);
 
+        applyForfeitScoring(username);
+
         // Xóa dữ liệu của người out giữa chừng khỏi matchResults
         matchResults.remove(username);
         selectedTopics.remove(username);
@@ -971,6 +985,35 @@ public class GameSession {
         }
     }
 
+    /**
+     * Áp dụng điểm xếp hạng ngay khi một người rời trận đang diễn ra.
+     * Người rời trận bị trừ 20 điểm; mỗi người còn trong phòng được cộng 20.
+     */
+    private void applyForfeitScoring(String leaverUsername) {
+        try {
+            User leaver = getGameService().getUserRepository().findByUsername(leaverUsername);
+            if (leaver != null && leaver.getUserId() != null) {
+                getGameService().getUserRepository().addRankingScore(leaver.getUserId(), -FORFEIT_POINTS);
+            }
+
+            for (String remainingUsername : room.getPlayerUsernames()) {
+                User remaining = getGameService().getUserRepository().findByUsername(remainingUsername);
+                if (remaining != null && remaining.getUserId() != null) {
+                    getGameService().getUserRepository().addRankingScore(remaining.getUserId(), FORFEIT_POINTS);
+                }
+            }
+
+            Envelope notice = new Envelope(MessageType.ROOM_CHAT_RECEIVE);
+            notice.put("senderDisplayName", "Hệ thống");
+            notice.put("content", leaverUsername + " đã rời trận: bị trừ " + FORFEIT_POINTS
+                    + " điểm; mỗi người chơi còn lại được cộng " + FORFEIT_POINTS + " điểm.");
+            room.broadcast(notice);
+            getGameService().broadcastPlayerList();
+        } catch (Exception e) {
+            System.err.println("[GameSession] Lỗi cập nhật điểm khi người chơi bỏ trận: " + e.getMessage());
+        }
+    }
+
     // ========================================================================
     // TÍNH ĐIỂM
     // ========================================================================
@@ -1003,7 +1046,26 @@ public class GameSession {
      */
     private String normalizeAnswer(String answer) {
         if (answer == null) return "";
-        return answer.trim().toLowerCase().replaceAll("\\s+", " ");
+        String normalized = java.text.Normalizer.normalize(answer.toLowerCase(Locale.ROOT),
+                java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .replace('đ', 'd');
+        return normalized.replaceAll("[^\\p{L}\\p{N}]+", " ").trim().replaceAll("\\s+", " ");
+    }
+
+    /** Hide room chat that would reveal any selected answer during the active game. */
+    public synchronized boolean containsSecretAnswer(String message) {
+        if (!gameActive || message == null || message.isBlank()) return false;
+        String normalizedMessage = normalizeAnswer(message);
+        if (normalizedMessage.isEmpty()) return false;
+        String paddedMessage = " " + normalizedMessage + " ";
+        for (String topic : selectedTopics.values()) {
+            String normalizedTopic = normalizeAnswer(topic);
+            if (!normalizedTopic.isEmpty() && paddedMessage.contains(" " + normalizedTopic + " ")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

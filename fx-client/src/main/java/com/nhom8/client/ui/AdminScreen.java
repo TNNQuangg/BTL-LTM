@@ -15,6 +15,7 @@ public class AdminScreen {
     private Scene scene;
     private final ListView<String> users = new ListView<>();
     private final ListView<String> rooms = new ListView<>();
+    private final ListView<String> builtInTopics = new ListView<>();
     private final ListView<String> topics = new ListView<>();
     private final Label stats = new Label("Đang tải thống kê...");
     private final Label status = new Label("");
@@ -86,10 +87,20 @@ public class AdminScreen {
             String selected = topics.getSelectionModel().getSelectedItem();
             if (selected != null) app.getWsClient().send(new Envelope(MessageType.ADMIN_TOPIC_DELETE).put("word", selected));
         });
-        VBox topicPane = new VBox(10, new Label("Từ khóa thêm vào sẽ xuất hiện ở các trận tiếp theo."), topics,
+        builtInTopics.setPlaceholder(new Label("Không có từ khóa mặc định."));
+        topics.setPlaceholder(new Label("Chưa có từ khóa tự thêm."));
+
+        VBox builtInPane = new VBox(8, new Label("Kho từ khóa mặc định · chỉ xem"), builtInTopics);
+        VBox.setVgrow(builtInTopics, Priority.ALWAYS);
+        VBox customPane = new VBox(8, new Label("Từ khóa tự thêm · dùng trong các trận tiếp theo"), topics,
                 new HBox(8, word, add, delete));
-        topicPane.setPadding(new Insets(16));
+        HBox.setHgrow(word, Priority.ALWAYS);
         VBox.setVgrow(topics, Priority.ALWAYS);
+        SplitPane topicLists = new SplitPane(builtInPane, customPane);
+        topicLists.setDividerPositions(0.5);
+        VBox topicPane = new VBox(10, new Label("Kho từ khóa dùng để tạo lựa chọn trong trận."), topicLists);
+        topicPane.setPadding(new Insets(16));
+        VBox.setVgrow(topicLists, Priority.ALWAYS);
         tabs.getTabs().add(new Tab("Từ khóa", topicPane));
 
         root.setCenter(tabs);
@@ -125,6 +136,8 @@ public class AdminScreen {
                         + "  |  " + r.path("status").asText()));
             }
             case ADMIN_TOPICS -> {
+                builtInTopics.getItems().clear();
+                data.path("builtInTopics").forEach(t -> builtInTopics.getItems().add(t.asText()));
                 topics.getItems().clear();
                 data.path("topics").forEach(t -> topics.getItems().add(t.asText()));
             }

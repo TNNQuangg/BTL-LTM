@@ -65,7 +65,7 @@ Pha vẽ tranh: Thời gian tối đa 60 giây. Không được dùng chữ ho�
 Pha đoán tranh: Thời gian 30 giây cho mỗi bức tranh. Người đoán được phép nhập và gửi đáp án nhiều lần.
 Quyền đoán: Tác giả của bức tranh không được tham gia đoán bức tranh do chính mình vẽ.
 Gợi ý đáp án: Hệ thống hiển thị dạng gạch dưới tương ứng với độ dài và số lượng từ của đáp án (ví dụ: "___ ____" cho "con mèo").
-Xử lý sự cố người chơi rời phòng: Nếu số lượng người chơi giảm xuống dưới 3 (do thoát chủ động hoặc mất kết nối), trận đấu lập tức bị chấm dứt và hủy kết quả.
+Xử lý người chơi rời trận giữa chừng: Người rời trận (chủ động thoát hoặc mất kết nối) bị trừ 20 điểm xếp hạng; mỗi người còn lại trong phòng được cộng 20 điểm. Nếu số người còn lại dưới mức tối thiểu 2 người, trận đấu bị hủy phần kết quả thông thường; điểm phạt/thưởng rời trận vẫn được giữ.
 Chuyển quyền chủ phòng: Khi chủ phòng rời đi hoặc mất kết nối, Server tự động chuyển giao quyền chủ phòng cho người tiếp theo trong danh sách.
 Tự động nộp bài: Nếu hết 60 giây vẽ mà người chơi chưa chọn Gửi, Server sẽ tự động lấy dữ liệu canvas hiện tại làm bản nộp chính thức.
 Giới hạn kiểm duyệt nét vẽ: Quy định không viết chữ ghi đáp án là quy tắc fair-play, hệ thống không tự động nhận diện chữ viết tay trên canvas.

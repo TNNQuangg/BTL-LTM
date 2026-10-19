@@ -49,6 +49,10 @@ public class TopicPool {
         Collections.addAll(ALL_TOPICS, vanHoa);
     }
 
+    public static List<String> getBuiltInTopics() {
+        return List.copyOf(ALL_TOPICS);
+    }
+
     public static List<List<String>> getTopicOptionsForRoom(int playerCount) {
         int requiredTopics = playerCount * 3;
         List<String> available = new ArrayList<>(ALL_TOPICS);

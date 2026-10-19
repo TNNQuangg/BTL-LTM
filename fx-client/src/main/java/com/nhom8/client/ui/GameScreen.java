@@ -8,6 +8,7 @@ import com.nhom8.common.dto.StrokeDTO;
 import com.nhom8.common.message.Envelope;
 import com.nhom8.common.message.MessageType;
 import javafx.animation.PauseTransition;
+import javafx.animation.FadeTransition;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -57,7 +58,8 @@ public class GameScreen {
     private Label topInfoLabel;
     private Label timerLabel;
     private Label phaseLabel;
-    private HBox toolbar;
+    private Label currentPaintingLabel;
+    private FlowPane toolbar;
     private Button submitDrawingBtn;
     private TextField inputField;
     private Label guessFeedbackLabel;
@@ -75,6 +77,10 @@ public class GameScreen {
 
     private VBox gameOverBox;
     private VBox gameOverScoresBox;
+    private StackPane phaseAnnouncementOverlay;
+    private Label phaseAnnouncementTitle;
+    private Label phaseAnnouncementDetails;
+    private PauseTransition phaseAnnouncementTimer;
 
     private Scene scene;
     private final ObjectMapper mapper = new ObjectMapper()
@@ -125,11 +131,13 @@ public class GameScreen {
         VBox centerBox = new VBox(10);
         centerBox.setAlignment(Pos.CENTER);
         centerBox.setPadding(new Insets(10));
+        centerBox.setMinWidth(0);
         VBox.setVgrow(centerBox, Priority.ALWAYS);
 
         // Khung Canvas với viền nổi bật kiểu doodle
         StackPane canvasContainer = new StackPane();
         canvasContainer.setStyle("-fx-background-color: white; -fx-border-color: -fx-ink; -fx-border-width: 3; -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.2), 8, 0, 0, 2);");
+        canvasContainer.setMinSize(0, 0);
         VBox.setVgrow(canvasContainer, Priority.ALWAYS);
         canvasContainer.setMaxWidth(Double.MAX_VALUE);
         canvasContainer.setMaxHeight(Double.MAX_VALUE);
@@ -141,13 +149,30 @@ public class GameScreen {
         gc.setLineCap(StrokeLineCap.ROUND);
         gc.setLineJoin(StrokeLineJoin.ROUND);
 
+        // Keep the drawing surface inside the space left by the player and chat
+        // panels. Canvas coordinates stay at 640x460, so networked strokes remain
+        // compatible even when the window is narrower than the preferred layout.
+        Runnable fitCanvas = () -> {
+            double availableWidth = Math.max(0, canvasContainer.getWidth() - 12);
+            double availableHeight = Math.max(0, canvasContainer.getHeight() - 12);
+            if (availableWidth <= 0 || availableHeight <= 0) return;
+            double scale = Math.min(
+                    availableWidth / canvas.getWidth(),
+                    availableHeight / canvas.getHeight());
+            canvas.setScaleX(scale);
+            canvas.setScaleY(scale);
+        };
+        canvasContainer.widthProperty().addListener((obs, oldValue, newValue) -> fitCanvas.run());
+        canvasContainer.heightProperty().addListener((obs, oldValue, newValue) -> fitCanvas.run());
+
         setupCanvasEvents();
         canvasContainer.getChildren().add(canvas);
 
         // Toolbar vẽ
-        toolbar = new HBox(12);
+        toolbar = new FlowPane(10, 8);
         toolbar.setAlignment(Pos.CENTER);
         toolbar.setPadding(new Insets(8, 15, 8, 15));
+        toolbar.setMaxWidth(Double.MAX_VALUE);
         toolbar.setStyle("-fx-background-color: white; -fx-border-color: -fx-ink; -fx-border-width: 2;");
 
         ColorPicker colorPicker = new ColorPicker(Color.BLACK);
@@ -191,24 +216,28 @@ public class GameScreen {
         // --- LEFT: PLAYERS & SCORES ---
         VBox leftBox = new VBox(10);
         leftBox.setPadding(new Insets(10));
-        leftBox.setMinWidth(210);
-        leftBox.setPrefWidth(220);
+        leftBox.setMinWidth(155);
+        leftBox.setPrefWidth(190);
 
-        Label pLabel = new Label("🏆 Bảng điểm:");
+        Label pLabel = new Label("🏆 BXH trận · cập nhật trực tiếp");
         pLabel.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 22px; -fx-font-weight: bold; -fx-text-fill: -fx-ink;");
 
         ListView<String> pList = new ListView<>(playerList);
         VBox.setVgrow(pList, Priority.ALWAYS);
         pList.setMaxHeight(Double.MAX_VALUE);
 
-        leftBox.getChildren().addAll(pLabel, pList);
+        currentPaintingLabel = new Label("🖼 Chưa bắt đầu lượt đoán");
+        currentPaintingLabel.setWrapText(true);
+        currentPaintingLabel.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: -fx-ink; -fx-background-color: #FFF9E8; -fx-border-color: -fx-ink; -fx-border-width: 2; -fx-padding: 8;");
+
+        leftBox.getChildren().addAll(pLabel, pList, currentPaintingLabel);
         root.setLeft(leftBox);
 
         // --- RIGHT: CHAT & GUESS INPUT ---
         VBox rightBox = new VBox(10);
         rightBox.setPadding(new Insets(10));
-        rightBox.setMinWidth(280);
-        rightBox.setPrefWidth(300);
+        rightBox.setMinWidth(245);
+        rightBox.setPrefWidth(270);
 
         VBox chatTitleBox = new VBox(2);
         Label chatTitle = new Label("💬 CHAT PHÒNG & ĐOÁN TỪ");
@@ -219,6 +248,7 @@ public class GameScreen {
 
         chatView = new ListView<>(chatMessages);
         chatView.setCellFactory(list -> new ChatMessageCell());
+        chatView.setMinHeight(80);
         VBox.setVgrow(chatView, Priority.ALWAYS);
         chatView.setMaxHeight(Double.MAX_VALUE);
 
@@ -228,11 +258,13 @@ public class GameScreen {
         HBox inputBox = new HBox(8);
         inputField = new TextField();
         inputField.setPromptText("Nhập đáp án hoặc chat...");
+        inputField.setPrefHeight(38);
         HBox.setHgrow(inputField, Priority.ALWAYS);
         inputField.setOnAction(e -> handleInputSubmit());
 
         Button sendBtn = new Button("Gửi");
         sendBtn.getStyleClass().add("pencil-button-sm");
+        sendBtn.setMinWidth(58);
         sendBtn.setOnAction(e -> handleInputSubmit());
 
         inputBox.getChildren().addAll(inputField, sendBtn);
@@ -304,7 +336,32 @@ public class GameScreen {
 
         gameOverBox.getChildren().addAll(gameOverTitle, gameOverSubtitle, scoreScroll, okBtn);
 
-        StackPane mainStack = new StackPane(root, roundResultBox, topicSelectionBox, gameOverBox);
+        // Full-screen phase card shown briefly on each automatic phase transition.
+        phaseAnnouncementOverlay = new StackPane();
+        phaseAnnouncementOverlay.setStyle("-fx-background-color: rgba(15, 23, 42, 0.78);");
+        phaseAnnouncementOverlay.setMouseTransparent(true);
+        phaseAnnouncementOverlay.setVisible(false);
+
+        VBox phaseCard = new VBox(12);
+        phaseCard.setAlignment(Pos.CENTER);
+        phaseCard.setMaxWidth(720);
+        phaseCard.setPadding(new Insets(36, 52, 36, 52));
+        phaseCard.setStyle("-fx-background-color: #FFF9E8; -fx-border-color: #171717; -fx-border-width: 4; -fx-background-radius: 18; -fx-border-radius: 16; -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.35), 16, 0, 0, 6);");
+
+        phaseAnnouncementTitle = new Label();
+        phaseAnnouncementTitle.setWrapText(true);
+        phaseAnnouncementTitle.setAlignment(Pos.CENTER);
+        phaseAnnouncementTitle.setStyle("-fx-font-family: 'Amatic SC'; -fx-font-size: 56px; -fx-font-weight: bold; -fx-text-fill: #171717;");
+
+        phaseAnnouncementDetails = new Label();
+        phaseAnnouncementDetails.setWrapText(true);
+        phaseAnnouncementDetails.setAlignment(Pos.CENTER);
+        phaseAnnouncementDetails.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 22px; -fx-text-fill: #475569;");
+        phaseCard.getChildren().addAll(phaseAnnouncementTitle, phaseAnnouncementDetails);
+        phaseAnnouncementOverlay.getChildren().add(phaseCard);
+
+        StackPane mainStack = new StackPane(root, roundResultBox, topicSelectionBox, gameOverBox,
+                phaseAnnouncementOverlay);
         scene = new Scene(mainStack, 1150, 650);
         MainApplication.applyTheme(scene);
         return scene;
@@ -439,6 +496,10 @@ public class GameScreen {
     public void handleMessage(Envelope env) {
         Platform.runLater(() -> {
             switch (env.getType()) {
+                case GAME_START:
+                case MATCH_START:
+                    onGameStart(env);
+                    break;
                 case TOPIC_OPTIONS:
                     onTopicOptions(env);
                     break;
@@ -463,6 +524,9 @@ public class GameScreen {
                     appendChatMessage("⚡ " + env.getContent());
                     break;
                 case GUESS_RANKING_UPDATE:
+                    if (env.getData() != null && env.getData().has("scores")) {
+                        updateScoreboard(env.getData().get("scores"));
+                    }
                     onGuessRankingUpdate(env);
                     break;
                 case ROUND_RESULT:
@@ -537,6 +601,15 @@ public class GameScreen {
         }
     }
 
+    private void onGameStart(Envelope env) {
+        if (env.getInt("maxRounds", 0) > 0) this.maxRounds = env.getInt("maxRounds", this.maxRounds);
+        if (env.getData() != null && env.getData().has("scores")) {
+            updateScoreboard(env.getData().get("scores"));
+        }
+        phaseLabel.setText("Vòng 1/" + maxRounds + " • Chuẩn bị");
+        if (currentPaintingLabel != null) currentPaintingLabel.setText("🖼 Chưa bắt đầu lượt đoán");
+    }
+
     private void onTopicConfirmed(Envelope env) {
         if (roundResultTimer != null) {
             roundResultTimer.stop();
@@ -572,6 +645,9 @@ public class GameScreen {
 
         phaseLabel.setText("Vòng " + currentRound + "/" + maxRounds + " • Vẽ tranh");
         topInfoLabel.setText("Vẽ chủ đề của bạn: " + (mySelectedTopic != null && !mySelectedTopic.isEmpty() ? mySelectedTopic : "Hãy vẽ thật đẹp!"));
+        if (currentPaintingLabel != null) currentPaintingLabel.setText("🎨 Cả phòng đang vẽ");
+        showPhaseAnnouncement("VÒNG " + currentRound + " · VẼ TRANH",
+                "Bắt đầu pha vẽ! Hãy hoàn thành bức tranh trước khi hết giờ.");
     }
 
     private void onGuessStart(Envelope env) {
@@ -603,6 +679,9 @@ public class GameScreen {
         int total = env.getInt("totalPaintings", 1);
 
         phaseLabel.setText("Vòng " + currentRound + "/" + maxRounds + " • Đoán tranh (" + index + "/" + total + ")");
+        if (currentPaintingLabel != null) {
+            currentPaintingLabel.setText("🖼 Tranh " + index + "/" + total + " của " + currentPainter);
+        }
 
         if (currentPainter.equals(app.getCurrentUsername())) {
             topInfoLabel.setText("🖼 Tranh của BẠN đang được chiếu! (Không được đoán)");
@@ -615,6 +694,36 @@ public class GameScreen {
             guessFeedbackLabel.setText("Hãy nhanh tay đoán từ khóa!");
             guessFeedbackLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
         }
+
+        showPhaseAnnouncement("VÒNG " + currentRound + " · ĐOÁN TRANH",
+                "Lượt tranh " + index + "/" + total + " — "
+                        + (currentPainter.equals(app.getCurrentUsername())
+                        ? "mọi người đang đoán tranh của bạn."
+                        : "hãy nhập đáp án vào khung chat."));
+    }
+
+    private void showPhaseAnnouncement(String title, String details) {
+        if (phaseAnnouncementOverlay == null) return;
+        if (phaseAnnouncementTimer != null) phaseAnnouncementTimer.stop();
+
+        phaseAnnouncementTitle.setText(title);
+        phaseAnnouncementDetails.setText(details);
+        phaseAnnouncementOverlay.setOpacity(0);
+        phaseAnnouncementOverlay.setVisible(true);
+
+        FadeTransition fadeIn = new FadeTransition(Duration.millis(220), phaseAnnouncementOverlay);
+        fadeIn.setFromValue(0);
+        fadeIn.setToValue(1);
+        fadeIn.play();
+
+        phaseAnnouncementTimer = new PauseTransition(Duration.millis(1700));
+        phaseAnnouncementTimer.setOnFinished(event -> {
+            FadeTransition fadeOut = new FadeTransition(Duration.millis(280), phaseAnnouncementOverlay);
+            fadeOut.setToValue(0);
+            fadeOut.setOnFinished(fadeEvent -> phaseAnnouncementOverlay.setVisible(false));
+            fadeOut.play();
+        });
+        phaseAnnouncementTimer.playFromStart();
     }
 
     private void onPaintingDisplay(Envelope env) {
@@ -751,12 +860,22 @@ public class GameScreen {
 
     private void updateScoreboard(JsonNode scoresNode) {
         if (scoresNode == null || !scoresNode.isArray()) return;
-        playerList.clear();
-        scoresNode.forEach(s -> {
-            String u = s.has("username") ? s.get("username").asText() : "";
-            int total = s.has("totalPoints") ? s.get("totalPoints").asInt() : 0;
-            playerList.add(u + " (" + total + " đ)");
+        List<JsonNode> sortedScores = new ArrayList<>();
+        scoresNode.forEach(sortedScores::add);
+        sortedScores.sort((first, second) -> {
+            int byScore = Integer.compare(second.path("totalPoints").asInt(0), first.path("totalPoints").asInt(0));
+            if (byScore != 0) return byScore;
+            return first.path("username").asText("").compareToIgnoreCase(second.path("username").asText(""));
         });
+
+        List<String> rows = new ArrayList<>();
+        for (int index = 0; index < sortedScores.size(); index++) {
+            JsonNode score = sortedScores.get(index);
+            String name = score.path("displayName").asText(score.path("username").asText("Người chơi"));
+            int total = score.path("totalPoints").asInt(0);
+            rows.add((index + 1) + ".  " + name + "  ·  " + total + " đ");
+        }
+        playerList.setAll(rows);
     }
 
     private void onGameOver(Envelope env) {
@@ -799,16 +918,16 @@ public class GameScreen {
                 String medal;
                 if (rank == 1) {
                     bgStyle = "-fx-background-color: #FFF9DB; -fx-border-color: #F59F00; -fx-border-width: 2;";
-                    medal = "🥇";
+                    medal = "🥇 1";
                 } else if (rank == 2) {
                     bgStyle = "-fx-background-color: #F1F3F5; -fx-border-color: #ADB5BD; -fx-border-width: 2;";
-                    medal = "🥈";
+                    medal = "🥈 2";
                 } else if (rank == 3) {
                     bgStyle = "-fx-background-color: #FFF4E6; -fx-border-color: #F76707; -fx-border-width: 2;";
-                    medal = "🥉";
+                    medal = "🥉 3";
                 } else {
                     bgStyle = "-fx-background-color: #FFFFFF; -fx-border-color: #CED4DA; -fx-border-width: 1;";
-                    medal = "  #" + rank;
+                    medal = String.valueOf(rank);
                 }
                 card.setStyle(bgStyle + " -fx-background-radius: 8; -fx-border-radius: 8;");
 

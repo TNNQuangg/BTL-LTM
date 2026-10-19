@@ -452,12 +452,24 @@ public class MainApplication extends Application {
                 if (statusLabel != null) statusLabel.setText("");
                 showLobbyScreen();
             } else {
+                // The server sends a failed LOGIN_RESULT to an existing session
+                // when the same account logs in from another device. That session
+                // may already be showing the lobby, room, or game screen, so move
+                // it back to login instead of leaving a stale authenticated UI up.
+                if (currentUsername != null && !currentUsername.isBlank()) {
+                    returnToLogin(envelope.getContent() != null
+                            ? envelope.getContent()
+                            : "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
+                    return;
+                }
                 if (loginBtn != null) loginBtn.setDisable(false);
                 if (statusLabel != null) {
                     statusLabel.setStyle("-fx-text-fill: #D8000C; -fx-font-weight: bold;");
-                    statusLabel.setText(envelope.getContent());
+                    statusLabel.setText(envelope.getContent() != null
+                            ? envelope.getContent() : "Đăng nhập không thành công.");
                 }
-                DoodleDialog.error(primaryStage, "Đăng nhập thất bại", envelope.getContent());
+                DoodleDialog.error(primaryStage, "Đăng nhập thất bại",
+                        envelope.getContent() != null ? envelope.getContent() : "Đăng nhập không thành công.");
             }
         } else if (envelope.getType() == MessageType.REGISTER || envelope.getType() == MessageType.REGISTER_RESPONSE) {
             if (envelope.isSuccess()) {
@@ -635,6 +647,28 @@ public class MainApplication extends Application {
         }
     }
 
+    /** Clears the local authenticated state and returns the user to the login form. */
+    public void returnToLogin(String message) {
+        if (webSocketClient != null) {
+            webSocketClient.close();
+        }
+        currentUsername = "";
+        currentDisplayName = "";
+        currentRole = "USER";
+        lobbyScreen = null;
+        roomScreen = null;
+        gameScreen = null;
+        adminScreen = null;
+        lastRoomUpdate = null;
+        profileDialog = null;
+
+        showLoginScreen();
+        if (message != null && !message.isBlank() && statusLabel != null) {
+            statusLabel.setStyle("-fx-text-fill: #D8000C; -fx-font-weight: bold; -fx-font-size: 15px; -fx-font-family: 'Patrick Hand';");
+            statusLabel.setText(message);
+        }
+    }
+
     public boolean isAdmin() { return "ADMIN".equals(currentRole); }
 
     public void showAdminScreen() {
@@ -663,6 +697,13 @@ public class MainApplication extends Application {
         Scene scene = gameScreen.createScene();
         applyTheme(scene);
         primaryStage.setScene(scene);
+    }
+
+    public void showGameScreen(String roomId, Envelope startMessage) {
+        showGameScreen(roomId);
+        if (gameScreen != null && startMessage != null) {
+            gameScreen.handleMessage(startMessage);
+        }
     }
 
     @Override
