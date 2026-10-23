@@ -22,7 +22,8 @@ public class LiveServerTest {
         AtomicBoolean roomSuccess = new AtomicBoolean(false);
 
         String endpoint = args.length > 0 ? args[0] : "ws://localhost:8080/ws/game";
-        String testUsername = "user_" + java.util.UUID.randomUUID().toString().substring(0, 8);
+        boolean loginExisting = args.length > 2 && "--login-existing".equals(args[1]);
+        String testUsername = loginExisting ? args[2] : "user_" + java.util.UUID.randomUUID().toString().substring(0, 8);
         String testPassword = "mypassword123";
         String testDisplayName = "Hoa Si " + testUsername;
 
@@ -39,8 +40,8 @@ public class LiveServerTest {
                     loginSuccess.set(true);
                 }
                 loginLatch.countDown();
-            } else if (env.getType() == MessageType.ROOM_UPDATE || env.getType() == MessageType.ROOM_CREATE) {
-                roomSuccess.set(true);
+            } else if (env.getType() == MessageType.ROOM_RESPONSE) {
+                roomSuccess.set(env.isSuccess());
                 roomLatch.countDown();
             }
         });
@@ -50,19 +51,21 @@ public class LiveServerTest {
         client.connect().get(5, TimeUnit.SECONDS);
 
         // 2. Test Đăng ký
-        System.out.println("2. Gửi gói tin ĐĂNG KÝ: username=" + testUsername + ", displayName=" + testDisplayName);
-        Envelope regEnv = new Envelope(MessageType.REGISTER);
-        regEnv.put("username", testUsername);
-        regEnv.put("password", testPassword);
-        regEnv.put("displayName", testDisplayName);
-        client.send(regEnv);
+        if (!loginExisting) {
+            System.out.println("2. Gửi gói tin ĐĂNG KÝ: username=" + testUsername + ", displayName=" + testDisplayName);
+            Envelope regEnv = new Envelope(MessageType.REGISTER);
+            regEnv.put("username", testUsername);
+            regEnv.put("password", testPassword);
+            regEnv.put("displayName", testDisplayName);
+            client.send(regEnv);
 
-        boolean regWait = registerLatch.await(5, TimeUnit.SECONDS);
-        if (!regWait || !registerSuccess.get()) {
-            System.err.println("❌ TEST ĐĂNG KÝ THẤT BẠI!");
-            System.exit(1);
+            boolean regWait = registerLatch.await(5, TimeUnit.SECONDS);
+            if (!regWait || !registerSuccess.get()) {
+                System.err.println("❌ TEST ĐĂNG KÝ THẤT BẠI!");
+                System.exit(1);
+            }
+            System.out.println("✔ ĐĂNG KÝ THÀNH CÔNG!");
         }
-        System.out.println("✔ ĐĂNG KÝ THÀNH CÔNG!");
 
         // 3. Test Đăng nhập
         System.out.println("3. Gửi gói tin ĐĂNG NHẬP: username=" + testUsername);
