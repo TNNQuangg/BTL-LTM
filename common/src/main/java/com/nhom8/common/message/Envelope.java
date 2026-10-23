@@ -81,7 +81,7 @@ public class Envelope {
         if (data == null || !data.isObject()) {
             data = MAPPER.createObjectNode();
         }
-        ((ObjectNode) data).putPOJO(key, value);
+        ((ObjectNode) data).set(key, MAPPER.valueToTree(value));
         return this;
     }
 

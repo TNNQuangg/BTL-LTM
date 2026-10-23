@@ -4,6 +4,7 @@ import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactor
 import org.springframework.boot.web.server.WebServerFactoryCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
@@ -21,6 +22,8 @@ import com.nhom8.server.ws.GameWebSocketHandler;
 public class WebSocketConfig implements WebSocketConfigurer {
 
     private final GameWebSocketHandler gameWebSocketHandler;
+    @Value("${game.websocket.allowed-origins:*}")
+    private String allowedOrigins;
 
     public WebSocketConfig(GameWebSocketHandler gameWebSocketHandler) {
         this.gameWebSocketHandler = gameWebSocketHandler;
@@ -29,7 +32,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(gameWebSocketHandler, "/ws/game")
-                .setAllowedOrigins("*");
+                .setAllowedOrigins(allowedOrigins.split(","));
     }
 
     @Bean

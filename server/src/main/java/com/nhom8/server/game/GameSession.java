@@ -11,6 +11,7 @@ import com.nhom8.common.dto.StrokeDTO;
 import com.nhom8.common.message.Envelope;
 import com.nhom8.common.message.MessageType;
 import com.nhom8.server.service.GameService;
+import com.nhom8.server.service.ScoringService;
 import com.nhom8.server.util.JsonUtil;
 import com.nhom8.server.util.TopicPool;
 import com.nhom8.server.ws.ClientSession;
@@ -23,8 +24,7 @@ import com.nhom8.server.ws.ClientSession;
  * 3. Đoán tranh (30 giây/bức): Chiếu tuần tự từng bức, cả phòng đoán
  * 4. Tổng kết: Tính điểm, lưu kết quả, cập nhật bảng xếp hạng
  * 
- * Công thức điểm người đoán: Điểm(r) = 100 - (r-1) × floor(80/(m-1))
- * Công thức điểm người vẽ: floor((số người đoán đúng / tổng số người đoán) × 100)
+ * Điểm đoán phụ thuộc thời gian máy chủ; điểm vẽ kết hợp tỷ lệ đúng và tốc độ đoán.
  */
 public class GameSession {
 
@@ -79,11 +79,28 @@ public class GameSession {
     /** Cờ đánh dấu trận đấu đang diễn ra */
     private boolean gameActive;
 
+    /** Pha đang chạy và thời điểm kết thúc pha để đồng bộ người chơi quay lại. */
+    private volatile String currentPhase = "";
+    private volatile long phaseDeadlineMillis;
+    private long phaseSequence;
+    private final Map<String, String> drawingIds = new HashMap<>();
+    private final Map<String, Long> draftVersions = new HashMap<>();
+    private final Map<String, List<StrokeDTO>> drafts = new HashMap<>();
+    private final Map<String, String> drawingStates = new HashMap<>();
+    private final List<String> paintingOrder = new ArrayList<>();
+    private final Set<String> forfeitedPlayers = new HashSet<>();
+    private Envelope latestResult;
+    private final Set<String> latestResultMembers = new HashSet<>();
+    private Envelope latestRoundResult;
+
     /** Vòng chơi hiện tại */
     private int currentRound = 1;
 
-    /** Bộ đếm nanoTime khi bắt đầu lượt đoán — dùng cho tính thời gian chính xác */
-    private volatile long guessStartNanoTime;
+    /** Đồng hồ đơn điệu của máy chủ, tính theo mili giây, độc lập đồng hồ Client. */
+    private java.util.function.LongSupplier scoringClock = () -> System.nanoTime() / 1_000_000;
+    private long guessStartedAtMillis;
+    private GuessingWindow guessingWindow;
+    private final Set<String> finalizedDrawings = new HashSet<>();
 
     /** Lock object đảm bảo thứ tự xử lý đáp án tuần tự (kiểu message queue) */
     private final Object guessLock = new Object();
@@ -139,7 +156,9 @@ public class GameSession {
         this.guessResults = new ConcurrentHashMap<>();
         this.correctGuessers = ConcurrentHashMap.newKeySet();
         this.matchResults = new ConcurrentHashMap<>();
-        this.scheduler = Executors.newScheduledThreadPool(2);
+        this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r, "game-phase-timer"); thread.setDaemon(true); return thread;
+        });
         this.gameActive = false;
     }
 
@@ -153,7 +172,12 @@ public class GameSession {
      */
     public synchronized void startGame() {
         if (gameActive || room.isPlaying()) return;
+        if (room.getPlayerCount() < Room.MIN_PLAYERS || room.getPlayerCount() > Room.MAX_PLAYERS) return;
         gameActive = true;
+        finalizedDrawings.clear();
+        latestResult = null;
+        latestResultMembers.clear();
+        forfeitedPlayers.clear();
         currentRound = 1;
         room.setStatus(Room.RoomStatus.PLAYING);
 
@@ -187,6 +211,7 @@ public class GameSession {
         startMsg.put("currentRound", currentRound);
         startMsg.put("maxRounds", room.getMaxRounds());
         startMsg.put("scores", buildCurrentScores());
+        startMsg.put("scoringVersion", ScoringService.VERSION);
         room.broadcast(startMsg);
 
         // Bắt đầu vòng 1
@@ -196,7 +221,7 @@ public class GameSession {
     /**
      * Bắt đầu một vòng chơi mới (reset dữ liệu vẽ và chủ đề của vòng trước).
      */
-    private void startNewRound() {
+    private synchronized void startNewRound() {
         if (!gameActive) return;
         stopCountdown();
         cancelCurrentTimer();
@@ -205,7 +230,7 @@ public class GameSession {
         Set<String> activePlayers = room.getPlayerUsernames();
         playerOrder.removeIf(u -> !activePlayers.contains(u));
 
-        if (playerOrder.size() < Room.MIN_PLAYERS) {
+        if (playerOrder.size() < Room.MIN_ACTIVE_PLAYERS) {
             System.out.println("[GameSession] Không đủ người chơi để tiếp tục vòng mới");
             endGame();
             return;
@@ -219,6 +244,8 @@ public class GameSession {
         guessResults.clear();
         correctGuessers.clear();
         currentPaintingIndex = 0;
+        paintingOrder.clear(); drawingIds.clear(); draftVersions.clear(); drafts.clear(); drawingStates.clear();
+        latestRoundResult = null;
 
         // Bắt đầu chọn chủ đề cho vòng mới
         startTopicSelection();
@@ -233,7 +260,10 @@ public class GameSession {
      * Server lấy (3 × số người) chủ đề không trùng, chia bộ 3 cho mỗi người.
      * Người chơi có 10 giây để chọn 1 trong 3.
      */
-    private void startTopicSelection() {
+    private synchronized void startTopicSelection() {
+        currentPhase = "TOPIC_SELECT";
+        phaseSequence++;
+        phaseDeadlineMillis = System.currentTimeMillis() + TOPIC_SELECT_TIME;
         int playerCount = playerOrder.size();
         List<List<String>> allTopicSets = TopicPool.getTopicOptionsForRoom(playerCount);
 
@@ -241,6 +271,8 @@ public class GameSession {
             String username = playerOrder.get(i);
             List<String> topics = allTopicSets.get(i);
             topicOptions.put(username, topics);
+            drawingIds.put(username, UUID.randomUUID().toString());
+            drawingStates.put(username, "DRAFT");
 
             // Gửi 3 chủ đề cho Client
             Envelope msg = new Envelope(MessageType.TOPIC_OPTIONS);
@@ -248,6 +280,8 @@ public class GameSession {
             msg.put("timeLimit", TOPIC_SELECT_TIME / 1000);
             msg.put("currentRound", currentRound);
             msg.put("maxRounds", room.getMaxRounds());
+            stamp(msg);
+            msg.put("drawingId", drawingIds.get(username));
 
             ClientSession handler = room.getPlayer(username);
             if (handler != null) {
@@ -259,7 +293,7 @@ public class GameSession {
         startCountdown(TOPIC_SELECT_TIME / 1000, "TOPIC_SELECT");
 
         // Timer hết giờ chọn chủ đề
-        currentTimer = scheduler.schedule(() -> {
+        currentTimer = scheduleTask(() -> {
             // Auto-select cho những ai chưa chọn
             for (String username : playerOrder) {
                 if (!selectedTopics.containsKey(username)) {
@@ -280,8 +314,8 @@ public class GameSession {
     /**
      * Xử lý khi người chơi chọn chủ đề.
      */
-    public void onTopicSelected(String username, String topic) {
-        if (!gameActive) return;
+    public synchronized void onTopicSelected(String username, String topic) {
+        if (!gameActive || !"TOPIC_SELECT".equals(currentPhase) || System.currentTimeMillis() >= phaseDeadlineMillis) return;
         if (selectedTopics.containsKey(username)) return; // Đã chọn rồi
 
         // Kiểm tra topic hợp lệ (nằm trong 3 lựa chọn)
@@ -320,27 +354,49 @@ public class GameSession {
      * Bắt đầu giai đoạn vẽ tranh.
      * Tất cả người chơi cùng vẽ đồng thời trong 60 giây.
      */
-    private void startDrawingPhase() {
+    private synchronized void startDrawingPhase() {
+        if (!gameActive || !"TOPIC_SELECT".equals(currentPhase)) return;
         stopCountdown();
         submittedPlayers.clear();
 
         int drawingTime = room.getDrawTime() * 1000;
+        currentPhase = "DRAWING";
+        phaseSequence++;
+        phaseDeadlineMillis = System.currentTimeMillis() + drawingTime;
         Envelope drawStartMsg = new Envelope(MessageType.DRAW_START);
         drawStartMsg.put("timeLimit", room.getDrawTime());
         drawStartMsg.put("currentRound", currentRound);
         drawStartMsg.put("maxRounds", room.getMaxRounds());
-        room.broadcast(drawStartMsg);
+        stamp(drawStartMsg);
+        for (String username : playerOrder) {
+            ClientSession client = room.getPlayer(username);
+            if (client != null) client.sendMessage(Envelope.fromJson(drawStartMsg.toJson())
+                    .put("drawingId", drawingIds.get(username)));
+        }
 
         // Đếm ngược
         startCountdown(room.getDrawTime(), "DRAWING");
 
         // Timer hết giờ vẽ
-        currentTimer = scheduler.schedule(() -> {
-            // Người chưa nộp → lấy dữ liệu nét vẽ hiện có (từ STROKE_BATCH) làm bài nộp
+        currentTimer = scheduleTask(this::finishDrawingPhase, drawingTime, TimeUnit.MILLISECONDS);
+    }
+
+    private synchronized void finishDrawingPhase() {
+        if (!gameActive || !"DRAWING".equals(currentPhase)) return;
+            // Người đang kết nối được tự động nộp; bản nháp của người mất kết nối bị bỏ qua.
             for (String username : playerOrder) {
                 if (!submittedPlayers.contains(username)) {
+                    ClientSession client = room.getPlayer(username);
+                    if (client == null || !client.isConnected()) {
+                        drawingStates.put(username, "SKIPPED");
+                        drafts.remove(username);
+                        room.broadcast(new Envelope(MessageType.DRAWING_SKIPPED).put("username", username));
+                        continue;
+                    }
+                    submittedDrawings.put(username, new ArrayList<>(drafts.getOrDefault(username, List.of())));
                     submittedDrawings.putIfAbsent(username, Collections.synchronizedList(new ArrayList<>()));
                     submittedPlayers.add(username);
+                    drawingStates.put(username, "SUBMITTED");
 
                     // Lưu painting vào DB cho người chưa nộp thủ công — dùng JsonUtil.toJson()
                     try {
@@ -358,20 +414,22 @@ public class GameSession {
                 }
             }
             startGuessingPhase();
-        }, drawingTime, TimeUnit.MILLISECONDS);
     }
 
     /**
      * Xử lý khi nhận từng phần dữ liệu vẽ (chunk) từ người chơi, hoặc thao tác Undo/Clear.
      */
     @SuppressWarnings("unchecked")
-    public void onDrawingDataReceived(String username, Envelope request) {
-        if (!gameActive) return;
+    public synchronized void onDrawingDataReceived(String username, Envelope request) {
+        if (!canDraw(username, request, true)) return;
+        long version = request.getData().path("draftVersion").asLong(-1);
+        if (version >= 0 && version <= draftVersions.getOrDefault(username, -1L)) return;
+        if (version >= 0) draftVersions.put(username, version);
         
         List<StrokeDTO> drawDataList = JsonUtil.convertList(request.get("drawData"), StrokeDTO.class);
         if (drawDataList == null || drawDataList.isEmpty()) return;
 
-        List<StrokeDTO> currentData = submittedDrawings.computeIfAbsent(username, k -> Collections.synchronizedList(new ArrayList<>()));
+        List<StrokeDTO> currentData = drafts.computeIfAbsent(username, k -> new ArrayList<>());
 
         for (StrokeDTO chunk : drawDataList) {
             if (chunk.isClear()) {
@@ -390,9 +448,10 @@ public class GameSession {
      * Xử lý khi người chơi nộp tranh chính thức.
      */
     @SuppressWarnings("unchecked")
-    public void onDrawingSubmitted(String username, Envelope request) {
-        if (!gameActive) return;
-        if (submittedPlayers.contains(username)) return;
+    public synchronized void onDrawingSubmitted(String username, Envelope request) {
+        if (!Objects.equals(drawingIds.get(username), request.getString("drawingId"))) return;
+        if (submittedPlayers.contains(username)) { acknowledgeSubmission(username); return; }
+        if (!canDraw(username, request, true)) return;
 
         List<StrokeDTO> drawDataList = JsonUtil.convertList(request.get("drawData"), StrokeDTO.class);
         if (drawDataList != null && !drawDataList.isEmpty()) {
@@ -401,6 +460,8 @@ public class GameSession {
             submittedDrawings.putIfAbsent(username, Collections.synchronizedList(new ArrayList<>()));
         }
         submittedPlayers.add(username);
+        drawingStates.put(username, "SUBMITTED");
+        acknowledgeSubmission(username);
 
         // Lưu painting vào DB — dùng JsonUtil.toJson() để lưu dạng JSON hợp lệ
         try {
@@ -431,8 +492,10 @@ public class GameSession {
      * Bắt đầu giai đoạn đoán tranh.
      * Chiếu tuần tự từng bức tranh cho cả phòng đoán.
      */
-    private void startGuessingPhase() {
+    private synchronized void startGuessingPhase() {
         stopCountdown();
+        paintingOrder.clear();
+        for (String username : playerOrder) if (submittedPlayers.contains(username)) paintingOrder.add(username);
         currentPaintingIndex = 0;
         showNextPainting();
     }
@@ -440,14 +503,14 @@ public class GameSession {
     /**
      * Hiển thị bức tranh tiếp theo cho cả phòng đoán.
      */
-    private void showNextPainting() {
+    private synchronized void showNextPainting() {
         if (!gameActive) return;
 
         // Loại bỏ người chơi đã out khỏi playerOrder
         Set<String> activePlayers = room.getPlayerUsernames();
         playerOrder.removeIf(u -> !activePlayers.contains(u));
 
-        if (currentPaintingIndex >= playerOrder.size()) {
+        if (currentPaintingIndex >= paintingOrder.size()) {
             // Đã đoán hết tất cả bức tranh của vòng hiện tại!
             if (currentRound < room.getMaxRounds()) {
                 currentRound++;
@@ -459,7 +522,9 @@ public class GameSession {
                 room.broadcast(roundAnnounce);
 
                 // Cho người chơi đọc thông báo 1.5 giây rồi chuyển sang chọn chủ đề vòng mới
-                scheduler.schedule(this::startNewRound, 1500, TimeUnit.MILLISECONDS);
+                currentPhase = "INTERMISSION"; phaseSequence++;
+                phaseDeadlineMillis = System.currentTimeMillis() + 1500;
+                currentTimer = scheduleTask(this::startNewRound, 1500, TimeUnit.MILLISECONDS);
                 return;
             } else {
                 // Đã hoàn thành toàn bộ các vòng setting từ trước → Kết thúc trận
@@ -469,7 +534,8 @@ public class GameSession {
         }
 
         correctGuessers.clear();
-        String painterUsername = playerOrder.get(currentPaintingIndex);
+        String painterUsername = paintingOrder.get(currentPaintingIndex);
+        drawingStates.put(painterUsername, "PUBLISHED");
         String topic = selectedTopics.get(painterUsername);
         List<StrokeDTO> drawData = submittedDrawings.getOrDefault(painterUsername, new ArrayList<>());
         String hint = TopicPool.generateHint(topic);
@@ -477,13 +543,28 @@ public class GameSession {
         // Khởi tạo danh sách kết quả đoán cho bức tranh này
         guessResults.put(painterUsername, Collections.synchronizedList(new ArrayList<>()));
 
-        int guessingTime = room.getDrawTime() * 1000 / 2; // Đoán tranh bằng nửa thời gian vẽ
-        if (guessingTime < 15000) guessingTime = 15000;
+        int guessingTime = (int) ScoringService.GUESS_DURATION_MS;
+        currentPhase = "GUESSING";
+        phaseSequence++;
+        phaseDeadlineMillis = System.currentTimeMillis() + guessingTime;
+        guessStartedAtMillis = scoringClock.getAsLong();
+        Map<String, Boolean> candidates = new LinkedHashMap<>();
+        for (String username : playerOrder) {
+            if (!username.equals(painterUsername)) {
+                ClientSession candidate = room.getPlayer(username);
+                if (candidate != null) candidates.put(username, candidate.isConnected());
+            }
+        }
+        guessingWindow = new GuessingWindow(guessStartedAtMillis, guessingTime,
+                getGameService().getMinimumGuessExposureMillis(), candidates);
         
         Envelope guessStartMsg = new Envelope(MessageType.GUESS_START);
         guessStartMsg.put("painterUsername", painterUsername);
+        guessStartMsg.put("drawingId", drawingIds.get(painterUsername));
+        guessStartMsg.put("scoringVersion", ScoringService.VERSION);
         guessStartMsg.put("paintingIndex", currentPaintingIndex + 1);
-        guessStartMsg.put("totalPaintings", playerOrder.size());
+        guessStartMsg.put("totalPaintings", paintingOrder.size());
+        stamp(guessStartMsg);
         guessStartMsg.put("timeLimit", guessingTime / 1000);
         guessStartMsg.put("currentRound", currentRound);
         guessStartMsg.put("maxRounds", room.getMaxRounds());
@@ -492,6 +573,7 @@ public class GameSession {
         // Gửi dữ liệu bức tranh
         Envelope paintingMsg = new Envelope(MessageType.PAINTING_DISPLAY);
         paintingMsg.put("painterUsername", painterUsername);
+        paintingMsg.put("drawingId", drawingIds.get(painterUsername));
         paintingMsg.put("drawData", new ArrayList<>(drawData));
         paintingMsg.put("hint", hint);
         paintingMsg.put("currentRound", currentRound);
@@ -499,12 +581,11 @@ public class GameSession {
         room.broadcast(paintingMsg);
 
         // Đếm ngược
-        guessStartNanoTime = System.nanoTime();
         guessSequenceCounter = 0;
         startCountdown(guessingTime / 1000, "GUESSING");
 
         // Timer hết giờ đoán
-        currentTimer = scheduler.schedule(() -> {
+        currentTimer = scheduleTask(() -> {
             finishCurrentRound();
         }, guessingTime, TimeUnit.MILLISECONDS);
     }
@@ -515,13 +596,12 @@ public class GameSession {
      * Cơ chế hoạt động tương tự message queue (RabbitMQ):
      * 1. Mỗi đáp án được gán sequenceId tăng đơn điệu trong synchronized block
      *    → đảm bảo thứ tự tuyệt đối dù nhiều Client gửi đồng thời.
-     * 2. Thời gian phản hồi được ghi bằng System.nanoTime() (chính xác nano-giây)
-     *    → phân biệt được 2 người đoán đúng cách nhau vài mili-giây.
+     * 2. Thời gian chấp nhận được đo bằng đồng hồ đơn điệu, chính xác mili giây.
      * 3. Mọi lượt đoán (cả đúng lẫn sai) đều được lưu lại (audit log).
      * 4. Khi đoán đúng → tính điểm NGAY LẬP TỨC và broadcast bảng xếp hạng
      *    real-time cho cả phòng, không chờ hết giờ.
      */
-    public void onGuessSubmitted(String username, String guess) {
+    public synchronized void onGuessSubmitted(String username, String guess) {
         // === CRITICAL SECTION: synchronized để đảm bảo thứ tự tuyệt đối ===
         // Giống consumer trong RabbitMQ — chỉ 1 message được xử lý tại 1 thời điểm
         GuessResult result;
@@ -529,10 +609,15 @@ public class GameSession {
         boolean isCorrect;
         int currentRank = 0;
         int earnedPoints = 0;
+        long acceptedAtMillis = scoringClock.getAsLong();
 
         synchronized (guessLock) {
-            if (!gameActive || currentPaintingIndex < 0 || currentPaintingIndex >= playerOrder.size()) return;
-            painterUsername = playerOrder.get(currentPaintingIndex);
+            if (!gameActive || !"GUESSING".equals(currentPhase) || System.currentTimeMillis() >= phaseDeadlineMillis
+                    || !playerOrder.contains(username) || currentPaintingIndex < 0 || currentPaintingIndex >= paintingOrder.size()) return;
+            ClientSession connectedPlayer = room.getPlayer(username);
+            if (connectedPlayer == null || !connectedPlayer.isConnected() || guessingWindow == null
+                    || ScoringService.calculateGuessScore(guessStartedAtMillis, acceptedAtMillis, ScoringService.GUESS_DURATION_MS) == 0) return;
+            painterUsername = paintingOrder.get(currentPaintingIndex);
 
             // Người vẽ không được đoán tranh của mình
             if (username.equals(painterUsername)) return;
@@ -541,7 +626,7 @@ public class GameSession {
             if (correctGuessers.contains(username)) return;
 
             // Ghi nhận thời gian chính xác bằng nanoTime
-            long elapsedNanos = System.nanoTime() - guessStartNanoTime;
+            long elapsedNanos = (acceptedAtMillis - guessStartedAtMillis) * 1_000_000;
 
             // Gán sequenceId tăng đơn điệu — thứ tự xử lý tuyệt đối
             long seqId = ++guessSequenceCounter;
@@ -553,6 +638,8 @@ public class GameSession {
             result = new GuessResult(seqId, username, guess, isCorrect, elapsedNanos);
 
             if (isCorrect) {
+                earnedPoints = guessingWindow.awardCorrect(username, acceptedAtMillis);
+                if (earnedPoints == 0) return;
                 // Ghi nhận đoán đúng — rank được gán trong synchronized block
                 // → đảm bảo KHÔNG BAO GIỜ 2 người có cùng rank
                 correctGuessers.add(username);
@@ -560,8 +647,6 @@ public class GameSession {
                 result.rank = currentRank;
 
                 // === TÍNH ĐIỂM NGAY LẬP TỨC (không chờ hết lượt) ===
-                int totalGuessers = playerOrder.size() - 1;
-                earnedPoints = calculateGuessPoints(currentRank, totalGuessers);
                 result.points = earnedPoints;
 
                 // Cộng điểm vào MatchResult ngay
@@ -586,13 +671,14 @@ public class GameSession {
         feedbackMsg.put("guessContent", guess);
         feedbackMsg.put("sequenceId", result.sequenceId);
         feedbackMsg.put("elapsedMs", result.elapsedMs);
+        feedbackMsg.put("points", result.points);
+        feedbackMsg.put("scoringVersion", ScoringService.VERSION);
         feedbackMsg.setSender(username);
 
         if (isCorrect) {
             feedbackMsg.put("rank", result.rank);
             feedbackMsg.put("points", result.points);
-            feedbackMsg.setContent("Đoán đúng! Hạng #" + result.rank
-                    + " (" + formatTime(result.elapsedMs) + ") — +" + result.points + " điểm");
+            feedbackMsg.setContent("Chính xác! +" + result.points + " điểm (" + formatTime(result.elapsedMs) + ")");
         } else {
             feedbackMsg.setContent("Sai rồi, thử lại!");
         }
@@ -623,8 +709,7 @@ public class GameSession {
         }
 
         // --- Kiểm tra kết thúc sớm ---
-        int totalGuessers = playerOrder.size() - 1;
-        if (correctGuessers.size() == totalGuessers) {
+        if (guessingWindow.everyoneCorrect(acceptedAtMillis)) {
             cancelCurrentTimer();
             finishCurrentRound();
         }
@@ -663,7 +748,7 @@ public class GameSession {
         rankingMsg.put("painterUsername", painterUsername);
         rankingMsg.put("rankings", rankingList);
         rankingMsg.put("correctCount", rankingList.size());
-        rankingMsg.put("totalGuessers", playerOrder.size() - 1);
+        rankingMsg.put("totalGuessers", guessingWindow.eligibleGuessers(scoringClock.getAsLong()).size());
         rankingMsg.put("scores", buildCurrentScores());
         room.broadcast(rankingMsg);
     }
@@ -680,6 +765,7 @@ public class GameSession {
             entry.put("totalPoints", result != null ? result.getTotalPoints() : 0);
             entry.put("pointsDrawn", result != null ? result.getPointsDrawn() : 0);
             entry.put("pointsGuess", result != null ? result.getPointsGuess() : 0);
+            entry.put("pointsAdjustment", result != null ? result.getPointsAdjustment() : 0);
             scores.add(entry);
         }
         return scores;
@@ -704,25 +790,22 @@ public class GameSession {
      * Điểm người đoán đã được tính NGAY LẬP TỨC trong onGuessSubmitted (real-time),
      * ở đây chỉ cần tính điểm người vẽ và gửi bảng tổng kết lượt.
      */
-    private void finishCurrentRound() {
+    private synchronized void finishCurrentRound() {
+        if (!gameActive || !"GUESSING".equals(currentPhase)) return;
         stopCountdown();
 
-        String painterUsername = playerOrder.get(currentPaintingIndex);
-        int totalGuessers = playerOrder.size() - 1;
-        int correctCount = correctGuessers.size();
+        String painterUsername = paintingOrder.get(currentPaintingIndex);
+        if (!finalizedDrawings.add(drawingIds.get(painterUsername))) return;
+        long finalizedAt = scoringClock.getAsLong();
+        int totalGuessers = guessingWindow.eligibleGuessers(finalizedAt).size();
+        List<Integer> correctScores = guessingWindow.correctScores();
+        int correctCount = correctScores.size();
 
         // === Điểm người đoán đã được tính real-time trong onGuessSubmitted ===
         // (không cần tính lại ở đây — khác với phiên bản batch cũ)
 
         // === Tính điểm người vẽ ===
-        int painterPoints = 0;
-        if (totalGuessers > 0) {
-            if (correctCount == 0) {
-                painterPoints = -20; // Trừ 20 điểm nếu không ai đoán đúng
-            } else {
-                painterPoints = (int) Math.floor((double) correctCount / totalGuessers * 100);
-            }
-        }
+        int painterPoints = ScoringService.calculateDrawingScore(totalGuessers, correctScores);
         MatchResult painterResult = matchResults.get(painterUsername);
         if (painterResult != null) {
             painterResult.addDrawnPoints(painterPoints);
@@ -735,13 +818,20 @@ public class GameSession {
         roundResult.put("painterPoints", painterPoints);
         roundResult.put("correctCount", correctCount);
         roundResult.put("totalGuessers", totalGuessers);
-        roundResult.put("earlyFinish", totalGuessers > 0 && correctCount == totalGuessers);
+        roundResult.put("eligibleGuessers", guessingWindow.eligibleGuessers(finalizedAt));
+        roundResult.put("minimumExposureMs", getGameService().getMinimumGuessExposureMillis());
+        roundResult.put("sumOfCorrectGuessScores", correctScores.stream().mapToInt(Integer::intValue).sum());
+        roundResult.put("drawingPenalty", painterPoints < 0);
+        roundResult.put("drawingState", "PUBLISHED");
+        roundResult.put("drawingId", drawingIds.get(painterUsername));
+        roundResult.put("scoringVersion", ScoringService.VERSION);
+        roundResult.put("earlyFinish", guessingWindow.everyoneCorrect(finalizedAt));
         roundResult.put("currentRound", currentRound);
         roundResult.put("maxRounds", room.getMaxRounds());
         roundResult.put("paintingIndex", currentPaintingIndex + 1);
-        roundResult.put("totalPaintings", playerOrder.size());
+        roundResult.put("totalPaintings", paintingOrder.size());
 
-        boolean isEndOfRound = (currentPaintingIndex + 1 >= playerOrder.size());
+        boolean isEndOfRound = (currentPaintingIndex + 1 >= paintingOrder.size());
         boolean isLastRound = isEndOfRound && (currentRound >= room.getMaxRounds());
         roundResult.put("isEndOfRound", isEndOfRound);
         roundResult.put("isLastRound", isLastRound);
@@ -787,10 +877,13 @@ public class GameSession {
         roundResult.put("totalGuesses", guessFullLog.size());
 
         room.broadcast(roundResult);
+        latestRoundResult = roundResult;
+        currentPhase = "INTERMISSION"; phaseSequence++;
+        phaseDeadlineMillis = System.currentTimeMillis() + 3000;
 
         // Chuyển sang bức tranh tiếp theo (delay 3 giây để xem kết quả)
         currentPaintingIndex++;
-        scheduler.schedule(this::showNextPainting, 3, TimeUnit.SECONDS);
+        currentTimer = scheduleTask(this::showNextPainting, 3, TimeUnit.SECONDS);
     }
 
     // ========================================================================
@@ -805,6 +898,8 @@ public class GameSession {
     public synchronized void endGame() {
         if (!gameActive) return;
         gameActive = false;
+        currentPhase = "";
+        phaseDeadlineMillis = 0;
         stopCountdown();
         cancelCurrentTimer();
 
@@ -831,8 +926,9 @@ public class GameSession {
 
         // === Cập nhật điểm hạng (ranking score) CHỈ CHO người chơi hoàn thành trận đấu ===
         for (MatchResult mr : validResults) {
-            int totalPoints = mr.getTotalPoints();
-            if (totalPoints > 0 && mr.getUser() != null) {
+            int totalPoints = mr.getGameplayPoints();
+            // Các khoản rời trận đã cập nhật tức thì, không cộng lại lần nữa ở đây.
+            if (totalPoints != 0 && mr.getUser() != null) {
                 try {
                     getGameService().getUserRepository().addRankingScore(
                             mr.getUser().getUserId(), totalPoints);
@@ -855,11 +951,13 @@ public class GameSession {
             entry.put("displayName", (mr.getUser() != null && mr.getUser().getDisplayName() != null && !mr.getUser().getDisplayName().isEmpty()) ? mr.getUser().getDisplayName() : (mr.getUser() != null ? mr.getUser().getUsername() : "Người chơi"));
             entry.put("pointsDrawn", mr.getPointsDrawn());
             entry.put("pointsGuess", mr.getPointsGuess());
+            entry.put("pointsAdjustment", mr.getPointsAdjustment());
             entry.put("totalPoints", mr.getTotalPoints());
             scoreboard.add(entry);
         }
         gameResult.put("scoreboard", scoreboard);
         gameResult.put("totalRounds", room.getMaxRounds());
+        gameResult.put("scoringVersion", ScoringService.VERSION);
 
         // Thêm chi tiết từng bức tranh
         ArrayList<HashMap<String, Object>> paintingSummary = new ArrayList<>();
@@ -868,6 +966,7 @@ public class GameSession {
             HashMap<String, Object> pInfo = new HashMap<>();
             pInfo.put("painterUsername", painter);
             pInfo.put("topic", selectedTopics.get(painter));
+            pInfo.put("drawingState", drawingStates.getOrDefault(painter, "SKIPPED"));
 
             List<GuessResult> gResults = guessResults.get(painter);
             ArrayList<String> correctList = new ArrayList<>();
@@ -889,6 +988,8 @@ public class GameSession {
             paintingSummary.add(pInfo);
         }
         gameResult.put("paintingSummary", paintingSummary);
+        latestResult = gameResult;
+        latestResultMembers.clear(); latestResultMembers.addAll(activePlayers);
 
         room.broadcast(gameResult);
 
@@ -911,6 +1012,8 @@ public class GameSession {
     public synchronized void cancelGame() {
         if (!gameActive) return;
         gameActive = false;
+        currentPhase = "";
+        phaseDeadlineMillis = 0;
         stopCountdown();
         cancelCurrentTimer();
 
@@ -926,60 +1029,49 @@ public class GameSession {
      * Xoá toàn bộ dữ liệu của người chơi này khỏi trận đấu hiện tại.
      */
     public synchronized void onPlayerLeft(String username) {
-        if (!gameActive || username == null) return;
+        if (!gameActive || username == null || !forfeitedPlayers.add(username)) return;
+        if (guessingWindow != null && "GUESSING".equals(currentPhase))
+            guessingWindow.permanentlyLeft(username, scoringClock.getAsLong());
         System.out.println("[GameSession] Người chơi out giữa chừng: " + username);
 
         applyForfeitScoring(username);
 
         // Xóa dữ liệu của người out giữa chừng khỏi matchResults
         matchResults.remove(username);
-        selectedTopics.remove(username);
+        if (!submittedPlayers.contains(username)) selectedTopics.remove(username);
         topicOptions.remove(username);
-        submittedDrawings.remove(username);
-        submittedPlayers.remove(username);
-        correctGuessers.remove(username);
-
-        boolean wasCurrentPainter = false;
-        if (playerOrder != null && currentPaintingIndex >= 0 && currentPaintingIndex < playerOrder.size()) {
-            String currentPainter = playerOrder.get(currentPaintingIndex);
-            if (username.equalsIgnoreCase(currentPainter)) {
-                wasCurrentPainter = true;
-            }
-        }
+        drafts.remove(username);
+        if (!submittedPlayers.contains(username)) drawingStates.put(username, "SKIPPED");
+        // Người đã đoán đúng vẫn được tính là thành công dù rời/mất kết nối sau đó.
 
         if (playerOrder != null) {
             playerOrder.remove(username);
         }
 
-        // Nếu phòng không còn đủ người chơi (< 2), GameService sẽ dissolveRoom
-        if (room.getPlayerCount() < Room.MIN_PLAYERS) {
+        // Phiên đang chơi được tiếp tục khi còn ít nhất hai người.
+        if (room.getPlayerCount() < Room.MIN_ACTIVE_PLAYERS) {
             return;
         }
 
         // Nếu người thoát là painter của bức tranh đang chiếu, bỏ qua và chuyển tranh tiếp theo
-        if (wasCurrentPainter) {
-            cancelCurrentTimer();
-            showNextPainting();
-            return;
-        }
+        // Tranh đã nộp vẫn được chiếu dù tác giả đã rời phòng.
 
         // Nếu đang trong giai đoạn chọn chủ đề, kiểm tra nếu những người còn lại đã chọn hết
-        if (topicOptions.size() > 0 && selectedTopics.size() == playerOrder.size()) {
+        if ("TOPIC_SELECT".equals(currentPhase) && selectedTopics.keySet().containsAll(playerOrder)) {
             cancelCurrentTimer();
             startDrawingPhase();
             return;
         }
 
         // Nếu đang trong giai đoạn vẽ, kiểm tra nếu những người còn lại đã nộp hết
-        if (submittedPlayers.size() == playerOrder.size()) {
+        if ("DRAWING".equals(currentPhase) && submittedPlayers.containsAll(playerOrder)) {
             cancelCurrentTimer();
             startGuessingPhase();
             return;
         }
 
         // Nếu đang trong giai đoạn đoán tranh, kiểm tra nếu những người còn lại đã đoán đúng hết
-        int totalGuessers = playerOrder.size() - 1;
-        if (totalGuessers > 0 && correctGuessers.size() >= totalGuessers) {
+        if ("GUESSING".equals(currentPhase) && guessingWindow.everyoneCorrect(scoringClock.getAsLong())) {
             cancelCurrentTimer();
             finishCurrentRound();
         }
@@ -992,16 +1084,20 @@ public class GameSession {
     private void applyForfeitScoring(String leaverUsername) {
         try {
             User leaver = getGameService().getUserRepository().findByUsername(leaverUsername);
-            if (leaver != null && leaver.getUserId() != null) {
-                getGameService().getUserRepository().addRankingScore(leaver.getUserId(), -FORFEIT_POINTS);
-            }
-
+            List<Integer> remainingIds = new ArrayList<>();
             for (String remainingUsername : room.getPlayerUsernames()) {
                 User remaining = getGameService().getUserRepository().findByUsername(remainingUsername);
                 if (remaining != null && remaining.getUserId() != null) {
-                    getGameService().getUserRepository().addRankingScore(remaining.getUserId(), FORFEIT_POINTS);
+                    remainingIds.add(remaining.getUserId());
                 }
             }
+            if (leaver != null && leaver.getUserId() != null)
+                getGameService().getUserRepository().applyLeaveScores(leaver.getUserId(), remainingIds, FORFEIT_POINTS);
+            for (String username : room.getPlayerUsernames()) {
+                MatchResult remaining = matchResults.get(username);
+                if (remaining != null) remaining.addAdjustmentPoints(FORFEIT_POINTS);
+            }
+            room.broadcast(new Envelope(MessageType.GUESS_RANKING_UPDATE).put("scores", buildCurrentScores()));
 
             Envelope notice = new Envelope(MessageType.ROOM_CHAT_RECEIVE);
             notice.put("senderDisplayName", "Hệ thống");
@@ -1018,23 +1114,16 @@ public class GameSession {
     // TÍNH ĐIỂM
     // ========================================================================
 
-    /**
-     * Tính điểm cho người đoán đúng theo công thức:
-     * Điểm(r) = 100 - (r-1) × floor(80/(m-1))
-     * 
-     * Trong đó:
-     * - r: thứ hạng đoán đúng (1 = nhanh nhất)
-     * - m: tổng số người tham gia đoán bức tranh đó
-     * 
-     * @param rank thứ hạng đoán đúng
-     * @param totalGuessers tổng số người đoán
-     * @return điểm đạt được (tối thiểu 20)
-     */
-    private int calculateGuessPoints(int rank, int totalGuessers) {
-        if (totalGuessers <= 1) return 100;
-        int step = (int) Math.floor(80.0 / (totalGuessers - 1));
-        int points = 100 - (rank - 1) * step;
-        return Math.max(points, 20); // Tối thiểu 20 điểm
+    public synchronized void onConnectionChanged(String username, boolean connected) {
+        if (guessingWindow != null && "GUESSING".equals(currentPhase))
+            guessingWindow.connectionChanged(username, connected, scoringClock.getAsLong());
+    }
+
+    public synchronized void onGuessSubmitted(String username, Envelope request) {
+        if (!"GUESSING".equals(currentPhase) || currentPaintingIndex >= paintingOrder.size()) return;
+        String painter = paintingOrder.get(currentPaintingIndex);
+        if (!Objects.equals(request.getString("drawingId"), drawingIds.get(painter))) return;
+        onGuessSubmitted(username, request.getContent());
     }
 
     // ========================================================================
@@ -1072,15 +1161,16 @@ public class GameSession {
      * Bắt đầu đồng hồ đếm ngược gửi cập nhật mỗi giây.
      */
     private void startCountdown(int totalSeconds, String phase) {
-        final int[] remaining = {totalSeconds};
-
+        long version = phaseSequence;
         countdownTimer = scheduler.scheduleAtFixedRate(() -> {
-            if (remaining[0] >= 0) {
+            synchronized (this) {
+            if (version == phaseSequence && gameActive) {
                 Envelope timerMsg = new Envelope(MessageType.TIMER_UPDATE);
-                timerMsg.put("remaining", remaining[0]);
+                timerMsg.put("remaining", Math.max(0, (phaseDeadlineMillis - System.currentTimeMillis() + 999) / 1000));
                 timerMsg.put("phase", phase);
+                stamp(timerMsg);
                 room.broadcast(timerMsg);
-                remaining[0]--;
+            }
             }
         }, 0, 1, TimeUnit.SECONDS);
     }
@@ -1107,6 +1197,8 @@ public class GameSession {
      * Dọn dẹp dữ liệu sau trận đấu.
      */
     private void cleanup() {
+        currentPhase = "";
+        phaseDeadlineMillis = 0;
         selectedTopics.clear();
         topicOptions.clear();
         submittedDrawings.clear();
@@ -1137,6 +1229,157 @@ public class GameSession {
     public void setGameService(GameService GameService) {
         this.GameServiceRef = GameService;
     }
+
+    /** Sends a reconnecting player the current match phase and its saved data. */
+    public synchronized void sendReconnectState(ClientSession handler) {
+        if (handler == null || room.getPlayer(handler.getUsername()) != handler) return;
+        List<Envelope> events = new ArrayList<>();
+        if (!gameActive) {
+            boolean completedMember = latestResult != null && latestResultMembers.contains(handler.getUsername());
+            if (completedMember) {
+                events.add(new Envelope(MessageType.GAME_START));
+                events.add(latestResult);
+            }
+            handler.sendMessage(new Envelope(MessageType.GAME_STATE_SNAPSHOT).put("phase", completedMember ? "RESULTS" : "WAITING")
+                    .put("events", events).put("serverTime", System.currentTimeMillis()));
+            return;
+        }
+        if (playerOrder == null || !playerOrder.contains(handler.getUsername())) return;
+
+        Envelope start = new Envelope(MessageType.GAME_START);
+        start.put("playerOrder", new ArrayList<>(playerOrder));
+        start.put("currentRound", currentRound);
+        start.put("maxRounds", room.getMaxRounds());
+        start.put("scores", buildCurrentScores());
+        start.put("scoringVersion", ScoringService.VERSION);
+        events.add(start);
+
+        int remainingSeconds = (int) Math.max(0,
+                Math.ceil((phaseDeadlineMillis - System.currentTimeMillis()) / 1000.0));
+        switch (currentPhase) {
+            case "TOPIC_SELECT" -> {
+                if (selectedTopics.containsKey(handler.getUsername())) {
+                    Envelope confirmed = new Envelope(MessageType.TOPIC_CONFIRMED);
+                    confirmed.put("topic", selectedTopics.get(handler.getUsername()));
+                    confirmed.put("autoSelected", false);
+                    events.add(confirmed);
+                } else {
+                    Envelope options = new Envelope(MessageType.TOPIC_OPTIONS);
+                    options.put("topics", new ArrayList<>(topicOptions.getOrDefault(handler.getUsername(), List.of())));
+                    options.put("timeLimit", remainingSeconds);
+                    options.put("currentRound", currentRound);
+                    options.put("maxRounds", room.getMaxRounds());
+                    options.put("drawingId", drawingIds.get(handler.getUsername()));
+                    events.add(options);
+                }
+            }
+            case "DRAWING" -> {
+                Envelope confirmed = new Envelope(MessageType.TOPIC_CONFIRMED);
+                confirmed.put("topic", selectedTopics.get(handler.getUsername()));
+                confirmed.put("autoSelected", false);
+                events.add(confirmed);
+
+                Envelope drawStart = new Envelope(MessageType.DRAW_START);
+                drawStart.put("timeLimit", remainingSeconds);
+                drawStart.put("currentRound", currentRound);
+                drawStart.put("maxRounds", room.getMaxRounds());
+                drawStart.put("submitted", submittedPlayers.contains(handler.getUsername()));
+                drawStart.put("drawingId", drawingIds.get(handler.getUsername()));
+                drawStart.put("draftVersion", draftVersions.getOrDefault(handler.getUsername(), 0L));
+                events.add(drawStart);
+
+                Envelope savedDrawing = new Envelope(MessageType.DRAWING_RESUME);
+                List<StrokeDTO> strokes = submittedPlayers.contains(handler.getUsername())
+                        ? submittedDrawings.getOrDefault(handler.getUsername(), List.of()) : drafts.getOrDefault(handler.getUsername(), List.of());
+                synchronized (strokes) {
+                    savedDrawing.put("drawData", new ArrayList<>(strokes));
+                }
+                events.add(savedDrawing);
+            }
+            case "GUESSING" -> {
+                if (currentPaintingIndex < 0 || currentPaintingIndex >= paintingOrder.size()) return;
+                String painter = paintingOrder.get(currentPaintingIndex);
+                Envelope guessStart = new Envelope(MessageType.GUESS_START);
+                guessStart.put("painterUsername", painter);
+                guessStart.put("drawingId", drawingIds.get(painter));
+                guessStart.put("scoringVersion", ScoringService.VERSION);
+                guessStart.put("paintingIndex", currentPaintingIndex + 1);
+                guessStart.put("totalPaintings", paintingOrder.size());
+                guessStart.put("timeLimit", remainingSeconds);
+                guessStart.put("currentRound", currentRound);
+                guessStart.put("maxRounds", room.getMaxRounds());
+                guessStart.put("alreadyGuessed", correctGuessers.contains(handler.getUsername()));
+                events.add(guessStart);
+
+                Envelope painting = new Envelope(MessageType.PAINTING_DISPLAY);
+                painting.put("painterUsername", painter);
+                painting.put("drawingId", drawingIds.get(painter));
+                painting.put("drawData", new ArrayList<>(submittedDrawings.getOrDefault(painter, List.of())));
+                painting.put("hint", TopicPool.generateHint(selectedTopics.get(painter)));
+                painting.put("currentRound", currentRound);
+                painting.put("maxRounds", room.getMaxRounds());
+                events.add(painting);
+            }
+            case "INTERMISSION" -> { if (latestRoundResult != null) events.add(latestRoundResult); }
+            default -> { }
+        }
+        if (!currentPhase.isBlank()) {
+            Envelope timer = new Envelope(MessageType.TIMER_UPDATE);
+            timer.put("remaining", remainingSeconds);
+            timer.put("phase", currentPhase);
+            events.add(timer);
+        }
+        Envelope snapshot = new Envelope(MessageType.GAME_STATE_SNAPSHOT);
+        stamp(snapshot);
+        snapshot.put("phase", currentPhase);
+        snapshot.put("events", events);
+        snapshot.put("players", room.getPlayerListData());
+        snapshot.put("scores", buildCurrentScores());
+        snapshot.put("drawingState", drawingStates.get(handler.getUsername()));
+        handler.sendMessage(snapshot);
+    }
+
+
+    private ScheduledFuture<?> scheduleTask(Runnable action, long delay, TimeUnit unit) {
+        long version = phaseSequence;
+        return scheduler.schedule(() -> {
+            synchronized (this) { if (gameActive && version == phaseSequence) action.run(); }
+        }, delay, unit);
+    }
+
+    private void stamp(Envelope message) {
+        message.put("serverTime", System.currentTimeMillis());
+        message.put("phaseDeadline", phaseDeadlineMillis);
+        message.put("phaseSequence", phaseSequence);
+    }
+
+    private boolean canDraw(String username, Envelope request, boolean strictId) {
+        ClientSession player = room.getPlayer(username);
+        String id = request.getString("drawingId");
+        return gameActive && "DRAWING".equals(currentPhase) && System.currentTimeMillis() < phaseDeadlineMillis
+                && player != null && player.isConnected() && playerOrder.contains(username)
+                && !submittedPlayers.contains(username) && selectedTopics.containsKey(username)
+                && (!strictId && id == null || Objects.equals(id, drawingIds.get(username)));
+    }
+
+    public synchronized void onDraftSaved(String username, Envelope request) {
+        if (!canDraw(username, request, true)) return;
+        long version = request.getData().path("draftVersion").asLong(-1);
+        if (version > draftVersions.getOrDefault(username, -1L)) {
+            List<StrokeDTO> data = JsonUtil.convertList(request.get("drawData"), StrokeDTO.class);
+            if (data == null || data.size() > 20000) return;
+            drafts.put(username, new ArrayList<>(data));
+            draftVersions.put(username, version);
+        }
+        room.getPlayer(username).sendMessage(new Envelope(MessageType.DRAWING_DRAFT_ACK)
+                .put("drawingId", drawingIds.get(username)).put("draftVersion", draftVersions.getOrDefault(username, 0L)));
+    }
+
+    private void acknowledgeSubmission(String username) {
+        ClientSession player = room.getPlayer(username);
+        if (player != null) player.sendMessage(Envelope.success(MessageType.DRAWING_SUBMITTED, "Đã nhận tranh.")
+                .put("drawingId", drawingIds.get(username)).put("state", drawingStates.get(username)));
+    }
+
+    public synchronized void forgetFinishedRecovery(String username) { latestResultMembers.remove(username); }
 }
-
-

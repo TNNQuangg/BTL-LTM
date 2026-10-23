@@ -7,7 +7,7 @@
 
 1. **Chỉ dùng công nghệ có trong giáo trình** (`lap-trinh-mang-tai-lieu.md`). Không tự ý thêm framework/thư viện ngoài phạm vi môn học (ví dụ: KHÔNG dùng Spring Boot, KHÔNG dùng WebSocket/JSR 356, KHÔNG dùng RMI) trừ khi được yêu cầu rõ ràng — vì đề tài đã chốt kiến trúc **Socket TCP thuần + Swing**.
    - **Ngoại lệ đã được Huy duyệt:** tầng cơ sở dữ liệu dùng **Hibernate (ORM)** thay cho JDBC thuần như mẫu giáo trình. Đây là lựa chọn có chủ đích ngoài phạm vi giáo trình — cần ghi chú rõ trong báo cáo là "mở rộng so với giáo trình" để giảng viên không hiểu nhầm là sai lệch không chủ đích.
-2. **Bám sát luật chơi đã chốt** trong `game_rules_nhom8.md`. Không tự thay đổi cơ chế điểm số, thời gian, quy mô phòng... nếu Huy chưa yêu cầu sửa.
+2. **Bám sát luật chơi đã chốt** trong `game_rules_nhom8.md`. Không tự thay đổi cơ chế điểm số, thời gian, quy mô phòng... nếu Huy chưa yêu cầu sửa. Mỗi lần sửa luật theo yêu cầu người dùng phải cập nhật `game_rules_nhom8.md` cùng lúc với code và các hướng dẫn liên quan.
 3. **Tuân thủ mô hình MVC** giống case study mẫu trong giáo trình (Model / View / Controller tách riêng, đặt tên lớp theo mẫu: `XxxControl.java`, `XxxView.java`).
 4. **Comment và tài liệu báo cáo viết bằng tiếng Việt trang trọng**, đúng văn phong giáo trình (câu đầy đủ chủ ngữ - vị ngữ, không viết tắt tùy tiện).
 5. Trước khi code một module mới, agent nên tóm tắt lại thiết kế (schema bảng, giao thức message, tên lớp) và xác nhận với Huy nếu có điểm chưa rõ, thay vì tự suy đoán rồi code sai hướng.
@@ -203,14 +203,13 @@ public class HibernateUtil {
 
 Tóm tắt bắt buộc tuân thủ khi code logic server (chi tiết đầy đủ xem `game_rules_nhom8.md`):
 
-- Phòng chơi: tối thiểu **3**, tối đa **6** người.
+- Phòng chơi: tối thiểu **3** người đang kết nối để bắt đầu, tối đa **8** người trong một phòng; phòng chờ được phép có 1–2 người. Trận đang chơi tiếp tục khi còn ít nhất **2** thành viên hợp lệ.
 - Giai đoạn vẽ: **60 giây/người**, mỗi người 1 chủ đề riêng không trùng.
 - Giai đoạn đoán: **30 giây/bức tranh**, gợi ý hiển thị dạng gạch dưới theo số ký tự/từ.
-- Công thức điểm người đoán:
-  `Điểm(r) = 100 - (r-1) × [80/(m-1)]` (làm tròn xuống, tối thiểu 20 điểm)
-- Điểm người vẽ: `(số người đoán đúng / tổng số người đoán) × 100`
+- Điểm đoán: `round(20 + 80 × (30000 − t) / 30000)` với `0 ≤ t < 30000` ms do Server đo. Đúng nhận 20–100 điểm, sai/quá hạn nhận 0; thứ tự không quyết định điểm.
+- Điểm vẽ: `round(70 × k/m + 30 × S/(100 × m))`. Người đủ điều kiện đã đúng hoặc có ≥10000 ms kết nối cộng dồn. `m=0`: 0, `m>0,k=0`: −20. Chi tiết và ví dụ bắt buộc xem mục 4 trong `game_rules_nhom8.md`.
 - Chỉ có 2 kết quả: đoán đúng (có điểm) hoặc sai/timeout (0 điểm) — **không có mức "gần đúng"**.
-- Rời phòng giữa chừng: nếu số người còn lại < 3 → Server giải tán phòng ngay lập tức.
+- Mất kết nối: giữ chỗ **30 giây**, không phạt khi trở lại đúng hạn. Hết hạn hoặc xác nhận rời trận: xử lý rời phòng và điểm phạt/thưởng đúng một lần. Trận đang chơi bị giải tán nếu còn dưới **2** thành viên hợp lệ. Chi tiết xem mục 3 của `game_rules_nhom8.md`.
 
 Nếu bất kỳ yêu cầu code nào mâu thuẫn với danh sách trên, agent phải dừng lại và hỏi lại Huy trước khi triển khai, thay vì tự suy đoán.
 

@@ -22,7 +22,7 @@ import com.nhom8.server.repository.UserRepository;
 import com.nhom8.server.ws.ClientSession;
 
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.*;
 
 /**
  * Lớp điều khiển trung tâm (Controller/Service) phía Server của trò chơi "Vẽ Hình Đoán Ý".
@@ -38,9 +38,24 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 public class GameService {
 
+    @org.springframework.beans.factory.annotation.Value("${game.reconnect-grace-ms:30000}")
+    private long reconnectGraceMillis = 30_000;
+    @org.springframework.beans.factory.annotation.Value("${game.scoring.minimum-exposure-ms:10000}")
+    private long minimumGuessExposureMillis = 10_000;
+
+    public long getMinimumGuessExposureMillis() { return minimumGuessExposureMillis; }
+    private java.util.function.LongSupplier clock = System::currentTimeMillis;
+    private final Map<String, String> recoveryTokens = new ConcurrentHashMap<>();
+
     /** Bảng ánh xạ username → ClientSession cho tất cả người chơi đang trực tuyến */
     private final ConcurrentHashMap<String, ClientSession> onlineClients = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Set<String>> roomInvites = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, PendingReconnect> pendingReconnects = new ConcurrentHashMap<>();
+    private final ScheduledExecutorService reconnectScheduler = Executors.newSingleThreadScheduledExecutor(task -> {
+        Thread thread = new Thread(task, "player-reconnect-expiry");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     /** Danh sách tất cả ClientSession đang kết nối (kể cả chưa đăng nhập) */
     private final List<ClientSession> allClients = Collections.synchronizedList(new ArrayList<>());
@@ -57,6 +72,24 @@ public class GameService {
     private final org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder roomPasswordEncoder =
             new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder();
 
+    private static final class PendingReconnect {
+        private final String roomId;
+        private final ClientSession disconnectedSession;
+        private final long deadline;
+        private volatile ScheduledFuture<?> expiryTask;
+
+        private PendingReconnect(String roomId, ClientSession disconnectedSession, long deadline) {
+            this.roomId = roomId;
+            this.disconnectedSession = disconnectedSession;
+            this.deadline = deadline;
+        }
+    }
+
+    @jakarta.annotation.PreDestroy
+    public void stopReconnectScheduler() {
+        reconnectScheduler.shutdownNow();
+    }
+
     @org.springframework.beans.factory.annotation.Autowired
     private CustomTopicRepository customTopicRepository;
 
@@ -67,6 +100,7 @@ public class GameService {
     public void loadCustomTopics() {
         refreshCustomTopics();
         refreshBuiltInTopics();
+        reconnectScheduler.scheduleAtFixedRate(this::expireDisconnectedSessions, 1, 1, TimeUnit.SECONDS);
     }
 
     private void refreshCustomTopics() {
@@ -134,7 +168,7 @@ public class GameService {
     @org.springframework.beans.factory.annotation.Autowired
     private AuthService authService;
 
-    public void handleAuth(ClientSession handler, Envelope request) {
+    public synchronized void handleAuth(ClientSession handler, Envelope request) {
         String username = request.get("username");
         String password = request.get("password");
         if (username == null || password == null) return;
@@ -142,14 +176,28 @@ public class GameService {
         try {
             com.nhom8.common.message.payload.LoginResultPayload payload = authService.login(username, password);
             username = payload.getPlayer().getUsername();
-            if (onlineClients.containsKey(username)) {
-                // Đóng connection cũ
-                ClientSession oldSession = onlineClients.get(username);
-                oldSession.sendMessage(Envelope.error(MessageType.LOGIN_RESULT, "Đăng nhập ở nơi khác."));
-                try {
-                    oldSession.getSession().close(org.springframework.web.socket.CloseStatus.NORMAL);
-                } catch (java.io.IOException e) {
-                    e.printStackTrace();
+            if (handler.getUsername() != null && !handler.getUsername().equals(username)) {
+                handler.sendMessage(Envelope.error(MessageType.LOGIN_RESULT, "Vui lòng đăng xuất trước khi đổi tài khoản."));
+                return;
+            }
+            boolean resumeRequested = request.getBoolean("resume", false);
+            if (resumeRequested && !Objects.equals(recoveryTokens.get(username), request.getString("resumeToken"))) {
+                handler.sendMessage(Envelope.error(MessageType.LOGIN_RESULT, "Phiên khôi phục không hợp lệ.")
+                        .putBoolean("recoveryRejected", true));
+                return;
+            }
+            if (resumeRequested && request.getString("resumeToken") == null) {
+                handler.sendMessage(Envelope.error(MessageType.LOGIN_RESULT, "Thiếu mã khôi phục phiên."));
+                return;
+            }
+            ClientSession oldSession = onlineClients.get(username);
+            if (oldSession != null && oldSession != handler) {
+                if (oldSession.isConnected()) {
+                    if (!resumeRequested) oldSession.sendMessage(Envelope.error(MessageType.SESSION_REPLACED, "Đăng nhập ở nơi khác."));
+                    handleDisconnect(oldSession);
+                    oldSession.disconnect();
+                } else {
+                    handleDisconnect(oldSession);
                 }
             }
 
@@ -158,12 +206,47 @@ public class GameService {
             onlineClients.put(username, handler);
             System.out.println("[SERVER] User " + username + " đã kết nối WebSocket.");
 
+            PendingReconnect reconnect = pendingReconnects.get(username);
+            Room restoredRoom = null;
+            if (reconnect != null) {
+                if (clock.getAsLong() >= reconnect.deadline) {
+                    expireReconnectWindow(username, reconnect);
+                    reconnect = null;
+                }
+            }
+            if (reconnect != null && pendingReconnects.remove(username, reconnect)) {
+                if (reconnect.expiryTask != null) reconnect.expiryTask.cancel(false);
+                restoredRoom = roomManager.getRoom(reconnect.roomId);
+                if (restoredRoom == null || !restoredRoom.reconnectPlayer(handler)) {
+                    restoredRoom = null;
+                }
+            }
+            handler.setConnectionState(com.nhom8.common.dto.ConnectionState.CONNECTED);
+            if (restoredRoom != null) restoredRoom.getGameSession().onConnectionChanged(username, true);
+            String recoveryToken = resumeRequested ? recoveryTokens.get(username) : UUID.randomUUID().toString();
+            recoveryTokens.put(username, recoveryToken);
+
             Envelope response = new Envelope(MessageType.LOGIN_RESULT);
             response.setSuccess(true);
             response.setContent("Đăng nhập thành công");
             response.put("player", payload.getPlayer());
+            response.put("resumeToken", recoveryToken);
+            response.put("graceMillis", reconnectGraceMillis);
+            response.put("serverTime", System.currentTimeMillis());
+            if (resumeRequested && restoredRoom == null) {
+                response.putBoolean("recoveryRejected", true);
+                String previousRoomId = request.getString("resumeRoomId");
+                Room previousRoom = previousRoomId == null ? null : roomManager.getRoom(previousRoomId);
+                response.put("previousRoomId", previousRoomId);
+                response.putBoolean("canRejoin", previousRoom != null && previousRoom.getStatus() == Room.RoomStatus.WAITING && !previousRoom.isFull());
+            }
             User loggedInUser = userRepository.findByUsername(username);
             response.put("role", loggedInUser != null ? loggedInUser.getRole() : "USER");
+            if (restoredRoom != null) {
+                response.put("reconnected", true);
+                response.put("roomId", restoredRoom.getRoomId());
+                response.put("roomName", restoredRoom.getRoomName());
+            }
             handler.sendMessage(response);
 
             sendChatInbox(handler);
@@ -172,6 +255,16 @@ public class GameService {
             sendRoomList(handler);
             sendFriendListToUser(username);
             broadcastFriendListToFriends(username);
+            if (restoredRoom != null) {
+                broadcastRoomUpdate(restoredRoom);
+                broadcastRoomList();
+                restoredRoom.getGameSession().sendReconnectState(handler);
+                restoredRoom.broadcast(new Envelope(MessageType.PLAYER_RECONNECTED).put("username", username));
+                Envelope reconnected = new Envelope(MessageType.ROOM_CHAT);
+                reconnected.put("senderDisplayName", "Hệ thống");
+                reconnected.put("content", payload.getPlayer().getDisplayName() + " đã kết nối lại.");
+                restoredRoom.broadcast(reconnected);
+            }
         } catch (Exception e) {
             handler.sendMessage(Envelope.error(MessageType.LOGIN_RESULT, e.getMessage()));
         }
@@ -244,7 +337,7 @@ public class GameService {
         }
     }
 
-    public void handleJoinRoom(ClientSession handler, Envelope request) {
+    public synchronized void handleJoinRoom(ClientSession handler, Envelope request) {
         if (!handler.isAuthenticated() || handler.getUsername() == null) {
             handler.sendMessage(Envelope.error(MessageType.ROOM_RESPONSE, "Bạn cần đăng nhập trước khi vào phòng."));
             return;
@@ -275,7 +368,7 @@ public class GameService {
 
         if (room.isFull()) {
             handler.sendMessage(Envelope.error(MessageType.ROOM_RESPONSE,
-                    "Phòng đã đầy (tối đa 6 người)."));
+                    "Phòng đã đầy (tối đa " + Room.MAX_PLAYERS + " người)."));
             return;
         }
 
@@ -310,7 +403,7 @@ public class GameService {
         broadcastRoomList();
     }
 
-    public void handleLeaveRoom(ClientSession handler, Envelope request) {
+    public synchronized void handleLeaveRoom(ClientSession handler, Envelope request) {
         String roomId = handler.getCurrentRoomId();
         if (roomId == null) return;
 
@@ -319,8 +412,11 @@ public class GameService {
 
         room.removePlayer(handler);
         handler.setCurrentRoomId(null);
+        handler.setConnectionState(com.nhom8.common.dto.ConnectionState.CONNECTED);
+        PendingReconnect pending = pendingReconnects.remove(handler.getUsername());
+        if (pending != null && pending.expiryTask != null) pending.expiryTask.cancel(false);
 
-        if (room.isPlaying() && room.getPlayerCount() < Room.MIN_PLAYERS) {
+        if (room.isPlaying() && room.getPlayerCount() < Room.MIN_ACTIVE_PLAYERS) {
             dissolveRoom(room);
         } else if (room.getPlayerCount() == 0) {
             roomManager.removeRoom(roomId);
@@ -385,6 +481,7 @@ public class GameService {
             // Remove player from room
             room.removePlayer(targetSession);
             targetSession.setCurrentRoomId(null);
+            targetSession.setConnectionState(com.nhom8.common.dto.ConnectionState.CONNECTED);
 
             // Send notification to the kicked player
             Envelope kickedMsg = new Envelope(MessageType.ROOM_DISSOLVED);
@@ -459,8 +556,7 @@ public class GameService {
         if (roomId == null) return;
         Room room = roomManager.getRoom(roomId);
         if (room == null) return;
-        String guess = request.getContent();
-        room.getGameSession().onGuessSubmitted(handler.getUsername(), guess);
+        room.getGameSession().onGuessSubmitted(handler.getUsername(), request);
     }
 
 
@@ -1051,29 +1147,38 @@ public class GameService {
     // XỬ LÝ NGẮT KẾT NỐI
     // ========================================================================
 
-    public void handleDisconnect(ClientSession handler) {
+    public synchronized void handleDisconnect(ClientSession handler) {
         String username = handler.getUsername();
         if (username != null) {
             boolean wentOffline = onlineClients.remove(username, handler);
             if (wentOffline) broadcastFriendListToFriends(username);
 
             String roomId = handler.getCurrentRoomId();
-            if (roomId != null) {
+            if (wentOffline && roomId != null) {
                 Room room = roomManager.getRoom(roomId);
                 if (room != null) {
-                    room.removePlayer(handler);
-
+                    long deadline = clock.getAsLong() + reconnectGraceMillis;
+                    handler.setConnectionState(com.nhom8.common.dto.ConnectionState.RECONNECTING);
+                    handler.setReconnectDeadline(deadline);
+                    room.getGameSession().onConnectionChanged(username, false);
+                    PendingReconnect pending = new PendingReconnect(roomId, handler, deadline);
+                    PendingReconnect previous = pendingReconnects.put(username, pending);
+                    if (previous != null && previous.expiryTask != null) previous.expiryTask.cancel(false);
+                    pending.expiryTask = reconnectScheduler.schedule(
+                            () -> expireReconnectWindow(username, pending),
+                            reconnectGraceMillis, TimeUnit.MILLISECONDS);
                     Envelope disconnectMsg = new Envelope(MessageType.PLAYER_DISCONNECTED);
                     disconnectMsg.put("username", username);
+                    disconnectMsg.put("graceSeconds", reconnectGraceMillis / 1000);
+                    disconnectMsg.put("reconnectDeadline", deadline);
+                    disconnectMsg.put("serverTime", System.currentTimeMillis());
                     room.broadcast(disconnectMsg);
-
-                    if (room.isPlaying() && room.getPlayerCount() < Room.MIN_PLAYERS) {
-                        dissolveRoom(room);
-                    } else if (room.getPlayerCount() == 0) {
-                        roomManager.removeRoom(roomId);
-                    } else {
-                        broadcastRoomUpdate(room);
-                    }
+                    Envelope notice = new Envelope(MessageType.ROOM_CHAT);
+                    notice.put("senderDisplayName", "Hệ thống");
+                    notice.put("content", username + " mất kết nối. Trận vẫn tiếp tục; người chơi có "
+                            + reconnectGraceMillis / 1000 + " giây để vào lại.");
+                    room.broadcast(notice);
+                    broadcastRoomUpdate(room);
                 }
             }
         }
@@ -1081,6 +1186,52 @@ public class GameService {
         allClients.remove(handler);
         broadcastPlayerList();
         broadcastRoomList();
+    }
+
+    private synchronized void expireReconnectWindow(String username, PendingReconnect pending) {
+        if (clock.getAsLong() < pending.deadline) return;
+        if (!pendingReconnects.remove(username, pending)) return;
+        Room room = roomManager.getRoom(pending.roomId);
+        if (room == null) return;
+        ClientSession disconnected = room.getPlayer(username);
+        if (disconnected != pending.disconnectedSession || disconnected.isConnected()) return;
+
+        room.removePlayer(disconnected);
+        disconnected.setCurrentRoomId(null);
+        Envelope expired = new Envelope(MessageType.ROOM_CHAT);
+        expired.put("senderDisplayName", "Hệ thống");
+        expired.put("content", username + " đã hết thời gian kết nối lại và đã rời phòng.");
+        room.broadcast(expired);
+
+        if (room.isPlaying() && room.getPlayerCount() < Room.MIN_ACTIVE_PLAYERS) {
+            dissolveRoom(room);
+        } else if (room.getPlayerCount() == 0) {
+            roomManager.removeRoom(room.getRoomId());
+        } else {
+            broadcastRoomUpdate(room);
+        }
+        broadcastPlayerList();
+        broadcastRoomList();
+    }
+
+    /** Chặn thông điệp trễ từ kết nối đã bị thay thế và tuần tự hóa vòng đời phiên. */
+    public synchronized void dispatchCurrent(ClientSession handler, Envelope message, Runnable action) {
+        switch (message.getType()) {
+            case LOGIN, LOGIN_REQUEST, REGISTER, REGISTER_REQUEST -> action.run();
+            default -> {
+                if (handler.isConnected() && handler.getUsername() != null
+                        && onlineClients.get(handler.getUsername()) == handler) action.run();
+            }
+        }
+    }
+
+    public void handleDrawingDraft(ClientSession handler, Envelope request) {
+        Room room = handler.getCurrentRoomId() == null ? null : roomManager.getRoom(handler.getCurrentRoomId());
+        if (room != null) room.getGameSession().onDraftSaved(handler.getUsername(), request);
+    }
+
+    public synchronized void expireDisconnectedSessions() {
+        pendingReconnects.forEach(this::expireReconnectWindow);
     }
 
     // ========================================================================
@@ -1161,8 +1312,16 @@ public class GameService {
         msg.put("roomId", room.getRoomId());
         msg.put("roomName", room.getRoomName());
         msg.put("hostUsername", room.getHostUsername());
-        msg.put("players", room.getPlayerListData());
+        var roomPlayers = room.getPlayerListData();
+        for (var player : roomPlayers) {
+            User user = authService.getProfile((String) player.get("username"));
+            player.put("avatar", user == null ? "1" : user.getAvatar());
+        }
+        msg.put("players", roomPlayers);
         msg.put("playerCount", room.getPlayerCount());
+        msg.put("minPlayers", Room.MIN_PLAYERS);
+        msg.put("maxPlayers", Room.MAX_PLAYERS);
+        msg.put("serverTime", System.currentTimeMillis());
         msg.put("status", room.getStatus().name());
         msg.put("maxRounds", room.getMaxRounds());
         msg.put("drawTime", room.getDrawTime());
@@ -1174,7 +1333,7 @@ public class GameService {
 
     private void dissolveRoom(Room room) {
         dissolveRoom(room, "Phòng đã bị giải tán do không đủ người chơi (tối thiểu "
-                + Room.MIN_PLAYERS + " người).");
+                + Room.MIN_ACTIVE_PLAYERS + " người trong trận đang chơi).");
     }
 
     private void dissolveRoom(Room room, String reason) {
@@ -1289,15 +1448,28 @@ public class GameService {
 
     public void handleLeaderboard(ClientSession handler, Envelope request) {
         List<User> topUsers = userRepository.findTop50ByOrderByRankingScoreDesc();
+        List<Integer> userIds = topUsers.stream().map(User::getUserId).filter(Objects::nonNull).toList();
+        Map<Integer, int[]> pointBreakdowns = new HashMap<>();
+        if (!userIds.isEmpty()) {
+            for (Object[] row : matchResultRepository.sumPointBreakdownByUserIds(userIds)) {
+                int userId = ((Number) row[0]).intValue();
+                int pointsDrawn = row[1] == null ? 0 : ((Number) row[1]).intValue();
+                int pointsGuess = row[2] == null ? 0 : ((Number) row[2]).intValue();
+                pointBreakdowns.put(userId, new int[]{pointsDrawn, pointsGuess});
+            }
+        }
         List<Map<String, Object>> leaderboard = new ArrayList<>();
         int rank = 1;
         for (User u : topUsers) {
+            int[] breakdown = pointBreakdowns.getOrDefault(u.getUserId(), new int[]{0, 0});
             Map<String, Object> entry = new HashMap<>();
             entry.put("rank", rank++);
             entry.put("username", u.getUsername());
             entry.put("displayName", u.getDisplayName());
             entry.put("avatar", u.getAvatar());
             entry.put("rankingScore", u.getRankingScore());
+            entry.put("pointsDrawn", breakdown[0]);
+            entry.put("pointsGuess", breakdown[1]);
             entry.put("online", isUserOnline(u.getUsername()));
             leaderboard.add(entry);
         }
@@ -1368,16 +1540,25 @@ public class GameService {
             response.put("username", updatedUser.getUsername());
             response.put("displayName", updatedUser.getDisplayName());
             response.put("avatar", updatedUser.getAvatar());
+            response.putBoolean("avatarUpdated", newAvatar != null && !newAvatar.isBlank());
             response.put("rankingScore", updatedUser.getRankingScore());
             handler.sendMessage(response);
 
             // Gửi lại danh sách người chơi toàn hệ thống và cập nhật bạn bè
             broadcastPlayerList();
             broadcastFriendListToFriends(handler.getUsername());
+            if (handler.getCurrentRoomId() != null) {
+                Room room = roomManager.getRoom(handler.getCurrentRoomId());
+                if (room != null) broadcastRoomUpdate(room);
+            }
         } catch (IllegalArgumentException e) {
-            handler.sendMessage(Envelope.error(MessageType.UPDATE_PROFILE_RESPONSE, e.getMessage()));
+            Envelope error = Envelope.error(MessageType.UPDATE_PROFILE_RESPONSE, e.getMessage());
+            error.putBoolean("avatarUpdated", newAvatar != null && !newAvatar.isBlank());
+            handler.sendMessage(error);
         } catch (Exception e) {
-            handler.sendMessage(Envelope.error(MessageType.UPDATE_PROFILE_RESPONSE, "Lỗi cập nhật: " + e.getMessage()));
+            Envelope error = Envelope.error(MessageType.UPDATE_PROFILE_RESPONSE, "Lỗi cập nhật: " + e.getMessage());
+            error.putBoolean("avatarUpdated", newAvatar != null && !newAvatar.isBlank());
+            handler.sendMessage(error);
         }
     }
 
@@ -1432,6 +1613,8 @@ public class GameService {
             }
             item.put("pointsDrawn", mr.getPointsDrawn() != null ? mr.getPointsDrawn() : 0);
             item.put("pointsGuess", mr.getPointsGuess() != null ? mr.getPointsGuess() : 0);
+            item.put("pointsAdjustment", mr.getPointsAdjustment());
+            item.put("scoringVersion", mr.getMatch() == null ? 1 : mr.getMatch().getScoringVersion());
             item.put("totalPoints", mr.getTotalPoints());
             historyList.add(item);
         }

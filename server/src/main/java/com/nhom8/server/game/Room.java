@@ -21,8 +21,9 @@ public class Room {
         WAITING, PLAYING, FINISHED
     }
 
-    public static final int MIN_PLAYERS = 2;
-    public static final int MAX_PLAYERS = 6;
+    public static final int MIN_PLAYERS = 3;
+    public static final int MAX_PLAYERS = 8;
+    public static final int MIN_ACTIVE_PLAYERS = 2;
 
     private String roomId;
     private String roomName;
@@ -64,16 +65,26 @@ public class Room {
         }
     }
 
+    /** Replaces a disconnected session while preserving the player's room and ready state. */
+    public synchronized boolean reconnectPlayer(ClientSession handler) {
+        if (handler == null || handler.getUsername() == null
+                || !players.containsKey(handler.getUsername())) return false;
+        players.put(handler.getUsername(), handler);
+        handler.setCurrentRoomId(roomId);
+        return true;
+    }
+
     public synchronized void removePlayer(ClientSession handler) {
         if (handler == null || handler.getUsername() == null) return;
-        players.remove(handler.getUsername());
+        if (!players.remove(handler.getUsername(), handler)) return;
+        handler.setConnectionState(com.nhom8.common.dto.ConnectionState.LEFT);
         readyStatus.remove(handler.getUsername());
         if (handler.getUsername().equalsIgnoreCase(hostUsername) && !players.isEmpty()) {
             hostUsername = players.keys().nextElement();
         }
         if (isPlaying() && gameSession != null) {
             gameSession.onPlayerLeft(handler.getUsername());
-        }
+        } else if (gameSession != null) gameSession.forgetFinishedRecovery(handler.getUsername());
     }
 
     public void setPlayerReady(String username, boolean ready) {
@@ -82,6 +93,7 @@ public class Room {
 
     public boolean allPlayersReady() {
         if (players.size() < MIN_PLAYERS) return false;
+        if (players.values().stream().anyMatch(p -> !p.isConnected())) return false;
         for (Boolean ready : readyStatus.values()) {
             if (!ready) return false;
         }
@@ -110,6 +122,9 @@ public class Room {
             info.put("displayName", entry.getValue().getDisplayName());
             info.put("isReady", readyStatus.getOrDefault(entry.getKey(), false));
             info.put("isHost", entry.getKey().equalsIgnoreCase(hostUsername));
+            info.put("connected", entry.getValue().isConnected());
+            info.put("connectionState", entry.getValue().getConnectionState().name());
+            info.put("reconnectDeadline", entry.getValue().getReconnectDeadline());
             list.add(info);
         }
         return list;

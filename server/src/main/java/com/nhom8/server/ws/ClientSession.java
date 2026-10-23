@@ -29,6 +29,17 @@ public class ClientSession {
 
     /** Mã phòng chơi mà người chơi đang tham gia (null nếu chưa vào phòng) */
     private String currentRoomId;
+    private volatile com.nhom8.common.dto.ConnectionState connectionState = com.nhom8.common.dto.ConnectionState.CONNECTED;
+    private volatile long reconnectDeadline;
+    private volatile long lastPongMillis = System.currentTimeMillis();
+
+    public com.nhom8.common.dto.ConnectionState getConnectionState() { return connectionState; }
+    public void setConnectionState(com.nhom8.common.dto.ConnectionState state) { connectionState = state; }
+    public long getReconnectDeadline() { return reconnectDeadline; }
+    public void setReconnectDeadline(long deadline) { reconnectDeadline = deadline; }
+    public long getLastPongMillis() { return lastPongMillis; }
+    public void receivedPong() { lastPongMillis = System.currentTimeMillis(); }
+    public void ping() throws java.io.IOException { session.sendMessage(new org.springframework.web.socket.PingMessage()); }
 
     public ClientSession(WebSocketSession session) {
         this.session = new ConcurrentWebSocketSessionDecorator(session, 5000, 1024 * 1024);
@@ -98,7 +109,7 @@ public class ClientSession {
     }
 
     public boolean isConnected() {
-        return session != null && session.isOpen();
+        return connectionState == com.nhom8.common.dto.ConnectionState.CONNECTED && session != null && session.isOpen();
     }
 
     public boolean isOpen() {

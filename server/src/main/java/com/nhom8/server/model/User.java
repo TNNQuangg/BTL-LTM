@@ -36,7 +36,7 @@ public class User implements Serializable {
     @Column(nullable = false, length = 20)
     private String role = "USER";
 
-    @Column(nullable = false, length = 50)
+    @Column(nullable = false, columnDefinition = "LONGTEXT")
     private String avatar = "1";
 
     @Column(name = "display_name", unique = true, nullable = false, length = 50)
@@ -57,7 +57,7 @@ public class User implements Serializable {
         this.password = password;
         this.displayName = displayName;
         this.rankingScore = 0;
-        this.role = "admin".equalsIgnoreCase(username) ? "ADMIN" : "USER";
+        this.role = "USER";
     }
 
     /**

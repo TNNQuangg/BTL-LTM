@@ -42,6 +42,22 @@ public class GameScreen {
     private boolean isDrawingPhase = false;
     private boolean isGuessingPhase = false;
     private boolean hasSubmittedDrawing = false;
+    private boolean submissionPending;
+    private javafx.animation.Timeline draftSync;
+    private boolean strokeInProgress;
+    private String drawingId;
+    private String guessDrawingId;
+    private long draftVersion;
+    private JsonNode latestScores;
+    private final java.util.Set<String> reconnectingPlayers = new java.util.HashSet<>();
+    public record DraftRecovery(String drawingId, long version, List<StrokeDTO> strokes, boolean pending) {}
+
+    public DraftRecovery captureDraft() {
+        if (draftSync != null) draftSync.stop();
+        if (!isDrawingPhase || drawingId == null) return null;
+        if (!currentXPoints.isEmpty()) sendStrokeChunk();
+        return new DraftRecovery(drawingId, draftVersion, new ArrayList<>(myStrokes), submissionPending);
+    }
     private String currentPainter = "";
     private String mySelectedTopic = "";
     private int currentRound = 1;
@@ -111,8 +127,7 @@ public class GameScreen {
         Button leaveBtn = new Button("⬅ Thoát");
         leaveBtn.getStyleClass().add("pencil-button-sm");
         leaveBtn.setOnAction(e -> {
-            app.getWsClient().send(new Envelope(MessageType.ROOM_LEAVE));
-            app.showLobbyScreen();
+            app.confirmLeave(true);
         });
 
         topInfoLabel = new Label("Phòng: " + roomId + " | Đang khởi tạo...");
@@ -412,7 +427,8 @@ public class GameScreen {
 
     private void setupCanvasEvents() {
         canvas.setOnMousePressed(e -> {
-            if (!isDrawingPhase || hasSubmittedDrawing) return;
+            if (!isDrawingPhase || hasSubmittedDrawing || submissionPending) return;
+            strokeInProgress = true;
             PencilSound.playDraw(eraserSelected);
             currentXPoints.clear();
             currentYPoints.clear();
@@ -427,7 +443,7 @@ public class GameScreen {
         });
 
         canvas.setOnMouseDragged(e -> {
-            if (!isDrawingPhase || hasSubmittedDrawing) return;
+            if (!isDrawingPhase || hasSubmittedDrawing || submissionPending) return;
             PencilSound.playDraw(eraserSelected);
             gc.lineTo(e.getX(), e.getY());
             gc.stroke();
@@ -445,7 +461,8 @@ public class GameScreen {
         });
 
         canvas.setOnMouseReleased(e -> {
-            if (!isDrawingPhase || hasSubmittedDrawing) return;
+            if (!isDrawingPhase || hasSubmittedDrawing || submissionPending) return;
+            strokeInProgress = false;
             gc.lineTo(e.getX(), e.getY());
             gc.stroke();
             currentXPoints.add(e.getX());
@@ -468,6 +485,8 @@ public class GameScreen {
 
         Envelope env = new Envelope(MessageType.STROKE_BATCH);
         env.put("drawData", Collections.singletonList(stroke));
+        env.put("drawingId", drawingId);
+        env.put("draftVersion", ++draftVersion);
         app.getWsClient().send(env);
 
         currentXPoints.clear();
@@ -488,21 +507,24 @@ public class GameScreen {
 
         Envelope env = new Envelope(MessageType.STROKE_BATCH);
         env.put("drawData", Collections.singletonList(clearDto));
+        env.put("drawingId", drawingId);
+        env.put("draftVersion", ++draftVersion);
         app.getWsClient().send(env);
     }
 
     private void submitMyDrawing() {
-        if (!isDrawingPhase || hasSubmittedDrawing) return;
-        hasSubmittedDrawing = true;
+        if (!isDrawingPhase || hasSubmittedDrawing || submissionPending) return;
+        submissionPending = true;
         submitDrawingBtn.setDisable(true);
-        submitDrawingBtn.setText("Đã nộp ✔");
+        submitDrawingBtn.setText("Đang xác nhận…");
         toolbar.setDisable(true);
 
         Envelope submitEnv = new Envelope(MessageType.DRAW_SUBMIT);
         submitEnv.put("drawData", myStrokes);
+        submitEnv.put("drawingId", drawingId);
         app.getWsClient().send(submitEnv);
 
-        topInfoLabel.setText("Đã nộp bức tranh! Đang chờ người chơi khác hoàn thành...");
+        topInfoLabel.setText("Đang chờ máy chủ xác nhận đã nhận tranh...");
     }
 
     private void handleInputSubmit() {
@@ -515,6 +537,7 @@ public class GameScreen {
                 sendChat(text);
             } else {
                 Envelope guessEnv = new Envelope(MessageType.GUESS_SUBMIT);
+                guessEnv.put("drawingId", guessDrawingId);
                 guessEnv.setContent(text);
                 app.getWsClient().send(guessEnv);
                 guessFeedbackLabel.setText("Đã gửi đáp án: \"" + text + "\"");
@@ -548,6 +571,19 @@ public class GameScreen {
                 case DRAW_START:
                 case DRAW_PHASE_START:
                     onDrawStart(env);
+                    break;
+                case DRAWING_RESUME:
+                    onDrawingResume(env);
+                    break;
+                case DRAWING_SUBMITTED:
+                    if (java.util.Objects.equals(drawingId, env.getString("drawingId"))) {
+                        submissionPending = false; hasSubmittedDrawing = true;
+                        submitDrawingBtn.setDisable(true); submitDrawingBtn.setText("✔ Đã nộp");
+                        toolbar.setDisable(true);
+                    }
+                    break;
+                case DRAWING_SKIPPED:
+                    appendChatMessage("Tranh của " + env.getString("username") + " bị bỏ qua do mất kết nối khi hết giờ; không tính điểm vẽ.");
                     break;
                 case GUESS_START:
                 case GUESS_PHASE_START:
@@ -591,12 +627,11 @@ public class GameScreen {
                     break;
                 case ROOM_UPDATE:
                     if (env.getData() != null && env.getData().has("players")) {
-                        playerList.clear();
+                        reconnectingPlayers.clear();
                         env.getData().get("players").forEach(p -> {
-                            String name = p.has("displayName") ? p.get("displayName").asText() : p.get("username").asText();
-                            int score = p.has("score") ? p.get("score").asInt() : 0;
-                            playerList.add(name + " (" + score + " đ)");
+                            if (!p.path("connected").asBoolean(true)) reconnectingPlayers.add(p.path("username").asText());
                         });
+                        if (latestScores != null) updateScoreboard(latestScores);
                     }
                     break;
                 default:
@@ -660,6 +695,20 @@ public class GameScreen {
     }
 
     private void onDrawStart(Envelope env) {
+        if (draftSync != null) draftSync.stop();
+        draftSync = new javafx.animation.Timeline(new javafx.animation.KeyFrame(Duration.seconds(2), event -> {
+            if (app.getPrimaryStage().getScene() != scene) { draftSync.stop(); return; }
+            if (isDrawingPhase && !hasSubmittedDrawing && !submissionPending && strokeInProgress && !currentXPoints.isEmpty()
+                    && app.getWsClient().isConnected()) {
+                double x = currentXPoints.getLast(), y = currentYPoints.getLast();
+                sendStrokeChunk(); currentXPoints.add(x); currentYPoints.add(y);
+            }
+        }));
+        draftSync.setCycleCount(javafx.animation.Timeline.INDEFINITE);
+        draftSync.play();
+        drawingId = env.getString("drawingId");
+        draftVersion = env.getData().path("draftVersion").asLong(0);
+        submissionPending = false;
         if (env.getInt("currentRound", 0) > 0) this.currentRound = env.getInt("currentRound", 1);
         if (env.getInt("maxRounds", 0) > 0) this.maxRounds = env.getInt("maxRounds", 4);
 
@@ -670,7 +719,7 @@ public class GameScreen {
         isDrawingPhase = true;
         isGuessingPhase = false;
         GameSound.playPhaseStart();
-        hasSubmittedDrawing = false;
+        hasSubmittedDrawing = env.getBoolean("submitted", false);
         myStrokes.clear();
         currentXPoints.clear();
         currentYPoints.clear();
@@ -679,9 +728,9 @@ public class GameScreen {
         gc.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
 
         toolbar.setVisible(true);
-        toolbar.setDisable(false);
-        submitDrawingBtn.setDisable(false);
-        submitDrawingBtn.setText("📤 Nộp tranh");
+        toolbar.setDisable(hasSubmittedDrawing);
+        submitDrawingBtn.setDisable(hasSubmittedDrawing);
+        submitDrawingBtn.setText(hasSubmittedDrawing ? "✔ Đã nộp" : "📤 Nộp tranh");
 
         phaseLabel.setText("Vòng " + currentRound + "/" + maxRounds + " • Vẽ tranh");
         topInfoLabel.setText("Vẽ chủ đề của bạn: " + (mySelectedTopic != null && !mySelectedTopic.isEmpty() ? mySelectedTopic : "Hãy vẽ thật đẹp!"));
@@ -690,7 +739,32 @@ public class GameScreen {
                 "Bắt đầu pha vẽ! Hãy hoàn thành bức tranh trước khi hết giờ.");
     }
 
+    private void onDrawingResume(Envelope env) {
+        JsonNode drawData = env.getData() == null ? null : env.getData().get("drawData");
+        if (drawData == null || !drawData.isArray()) return;
+        DraftRecovery local = app.getLocalDraft();
+        if (!hasSubmittedDrawing && local != null && java.util.Objects.equals(drawingId, local.drawingId()) && local.version() > draftVersion) {
+            drawData = mapper.valueToTree(local.strokes());
+            draftVersion = local.version();
+            app.getWsClient().send(new Envelope(MessageType.DRAWING_DRAFT_SAVE).put("drawingId", drawingId)
+                    .put("draftVersion", draftVersion).put("drawData", local.strokes()));
+        }
+        for (JsonNode strokeNode : drawData) {
+            try {
+                StrokeDTO stroke = mapper.treeToValue(strokeNode, StrokeDTO.class);
+                drawStrokeFromNetwork(stroke);
+                if (stroke != null) myStrokes.add(stroke);
+            } catch (Exception ex) {
+                System.err.println("Không thể khôi phục nét vẽ sau khi kết nối lại: " + ex.getMessage());
+            }
+        }
+        appendChatMessage("↩ Đã khôi phục nét vẽ của bạn sau khi kết nối lại.");
+        if (!hasSubmittedDrawing && local != null && java.util.Objects.equals(drawingId, local.drawingId()) && local.pending()) submitMyDrawing();
+    }
+
     private void onGuessStart(Envelope env) {
+        guessDrawingId = env.getString("drawingId");
+        if (draftSync != null) draftSync.stop();
         if (env.getInt("currentRound", 0) > 0) this.currentRound = env.getInt("currentRound", 1);
         if (env.getInt("maxRounds", 0) > 0) this.maxRounds = env.getInt("maxRounds", 4);
 
@@ -699,14 +773,7 @@ public class GameScreen {
         }
         roundResultBox.setVisible(false);
 
-        // Tự động nộp tranh nếu chưa nộp khi chuyển sang giai đoạn đoán
-        if (isDrawingPhase && !hasSubmittedDrawing) {
-            // Flush nét vẽ dở dang còn lại
-            if (!currentXPoints.isEmpty()) {
-                sendStrokeChunk();
-            }
-            submitMyDrawing();
-        }
+        // Máy chủ đã chốt các tranh hợp lệ ở hạn cuối; không gửi bài nộp trễ.
 
         isDrawingPhase = false;
         isGuessingPhase = true;
@@ -733,6 +800,7 @@ public class GameScreen {
             topInfoLabel.setText("🔍 Đang đoán tranh của: " + currentPainter);
             inputField.setPromptText("Nhập từ khóa đoán vào đây...");
             guessFeedbackLabel.setText("Hãy nhanh tay đoán từ khóa!");
+            if (env.getBoolean("alreadyGuessed", false)) guessFeedbackLabel.setText("✔ Bạn đã đoán đúng tranh này.");
             guessFeedbackLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
         }
 
@@ -803,9 +871,9 @@ public class GameScreen {
         boolean correct = env.getBoolean("correct", false);
         if (correct) {
             GameSound.playCorrect();
-            int rank = env.getInt("rank", 1);
             int points = env.getInt("points", 0);
-            guessFeedbackLabel.setText("🎉 CHÍNH XÁC! Hạng #" + rank + " (+" + points + " điểm)");
+            long elapsedMs = env.getData().path("elapsedMs").asLong(0);
+            guessFeedbackLabel.setText("🎉 Chính xác! +" + points + " điểm · " + String.format(java.util.Locale.ROOT, "%.3f", elapsedMs / 1000.0) + " giây");
             guessFeedbackLabel.setStyle("-fx-text-fill: #52c41a; -fx-font-weight: bold; -fx-font-size: 13px;");
         } else {
             guessFeedbackLabel.setText("❌ Sai rồi! Hãy thử lại...");
@@ -822,7 +890,7 @@ public class GameScreen {
                 if (!u.equalsIgnoreCase(app.getCurrentUsername())) GameSound.playRoomCorrect();
                 int pts = latest.has("points") ? latest.get("points").asInt() : 0;
                 int r = latest.has("rank") ? latest.get("rank").asInt() : 1;
-                appendChatMessage("🏆 " + u + " đã đoán đúng hạng #" + r + " (+" + pts + " đ)");
+                appendChatMessage("🏆 " + u + " đoán đúng: +" + pts + " điểm (thứ tự #" + r + ")");
             }
         }
     }
@@ -840,7 +908,7 @@ public class GameScreen {
         int painterPoints = env.getInt("painterPoints", 0);
         int correctCount = env.getInt("correctCount", 0);
         int total = env.getInt("totalGuessers", 0);
-        boolean earlyFinish = env.getBoolean("earlyFinish", false) || (total > 0 && correctCount == total);
+        boolean earlyFinish = env.getBoolean("earlyFinish", false);
 
         if (!earlyFinish) GameSound.playTimeout();
 
@@ -854,8 +922,10 @@ public class GameScreen {
         details.append("🎨 Người vẽ: ").append(painter)
                .append(painterPoints >= 0 ? " (+" : " (")
                .append(painterPoints).append(" điểm)\n\n");
+        if (env.getBoolean("drawingPenalty", false)) details.append("Phạt vẽ: -20 vì không ai đoán đúng trong số người đủ điều kiện.\n");
+        else if (total == 0) details.append("Không có người đủ cơ hội đoán: 0 điểm, không phạt người vẽ.\n");
 
-        details.append("💡 Người đoán đúng (").append(correctCount).append("/").append(total).append("):\n");
+        details.append("💡 ").append(correctCount).append("/").append(total).append(" người đủ điều kiện đoán đúng:\n");
 
         if (env.getData() != null && env.getData().has("guessDetails") && env.getData().get("guessDetails").size() > 0) {
             JsonNode guessDetails = env.getData().get("guessDetails");
@@ -905,6 +975,7 @@ public class GameScreen {
 
     private void updateScoreboard(JsonNode scoresNode) {
         if (scoresNode == null || !scoresNode.isArray()) return;
+        latestScores = scoresNode;
         List<JsonNode> sortedScores = new ArrayList<>();
         scoresNode.forEach(sortedScores::add);
         sortedScores.sort((first, second) -> {
@@ -918,12 +989,14 @@ public class GameScreen {
             JsonNode score = sortedScores.get(index);
             String name = score.path("displayName").asText(score.path("username").asText("Người chơi"));
             int total = score.path("totalPoints").asInt(0);
-            rows.add((index + 1) + ".  " + name + "  ·  " + total + " đ");
+            rows.add((index + 1) + ".  " + name + "  ·  " + total + " đ"
+                    + (reconnectingPlayers.contains(score.path("username").asText()) ? " · Đang kết nối lại..." : ""));
         }
         playerList.setAll(rows);
     }
 
     private void onGameOver(Envelope env) {
+        if (draftSync != null) draftSync.stop();
         if (roundResultTimer != null) {
             roundResultTimer.stop();
         }
@@ -983,7 +1056,8 @@ public class GameScreen {
                 Label nameLbl = new Label(dName + (dName.equals(user) ? "" : " (@" + user + ")"));
                 nameLbl.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #1E293B;");
 
-                Label detailScoreLbl = new Label("Điểm vẽ: +" + pointsDrawn + "  |  Điểm đoán: +" + pointsGuess);
+                int adjustment = row.path("pointsAdjustment").asInt(0);
+                Label detailScoreLbl = new Label(String.format("Vẽ: %+d | Đoán: %+d | Thưởng/phạt: %+d", pointsDrawn, pointsGuess, adjustment));
                 detailScoreLbl.setStyle("-fx-font-size: 13px; -fx-text-fill: #64748B;");
                 infoBox.getChildren().addAll(nameLbl, detailScoreLbl);
                 HBox.setHgrow(infoBox, Priority.ALWAYS);

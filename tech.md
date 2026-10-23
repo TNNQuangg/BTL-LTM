@@ -95,13 +95,13 @@ Quy ước: tên enum `MessageType` ở `common`, server và client dùng chung.
 - Server **không** nhận diện chữ viết tay (luật fair-play).
 
 ## 7. Luật chơi cố định (KHÔNG được sửa)
-- Phòng: **3–6 người**. Bắt đầu khi **100% thành viên bấm Sẵn sàng**.
+- Phòng: **3–8 người**. Bắt đầu khi có ít nhất 3 người và **100% thành viên bấm Sẵn sàng**. Phòng chờ có thể có 1–2 người; phòng đủ 8 người không nhận thêm thành viên.
 - Chọn từ khóa: server chọn trước **3 × số người chơi** từ không trùng; mỗi người nhận **3 lựa chọn riêng**, **10 giây** chọn, quá giờ server tự chọn. Một kho từ chung (đồ vật thường ngày, thành ngữ/tục ngữ tiếng Việt).
-- Vẽ: **60 giây**, đồng thời tất cả người chơi. Không viết chữ/số lên tranh. Hết giờ mà chưa Gửi: server tự lấy canvas hiện tại.
+- Vẽ: **60 giây**, đồng thời tất cả người chơi. Không viết chữ/số lên tranh. Hết giờ: chỉ tự nộp bản nháp của người đang kết nối; bỏ qua tranh chưa nộp của người đã mất kết nối. Tranh đã được xác nhận nộp vẫn hợp lệ.
 - Đoán: lần lượt từng bức tranh, **30 giây/bức**, gợi ý dạng gạch dưới (`___ ____` cho "con mèo"). Được gửi đáp án **nhiều lần**. Tác giả **không** được đoán tranh của mình. Chỉ có đúng hoặc sai, **không có mức "gần đúng"**.
-- Điểm người đoán đúng: `Điểm(r) = floor(100 − (r−1) × 80/(m−1))`, `r` = thứ hạng đoán đúng theo thời gian, `m` = số người đoán = (số người trong phòng − 1), **tối thiểu 20 điểm**. Sai hoặc hết giờ = 0.
-- Điểm người vẽ: `(số người đoán đúng / tổng số người đoán) × 100`; **không ai đoán đúng → trừ 20 điểm**.
-- Rời phòng: còn **< 3 người** thì kết thúc trận ngay, **hủy kết quả**, gửi `ROOM_DISBANDED`. Chủ phòng rời/mất kết nối thì tự chuyển quyền cho người kế tiếp.
+- Điểm đoán: `round(20 + 80 × (30000 − t) / 30000)`, `t` theo đồng hồ đơn điệu của Server, đúng trong hạn nhận 20–100. Sai hoặc t ≥ 30000 ms nhận 0. Thứ tự chỉ để hiển thị.
+- Điểm vẽ: `round(70 × k/m + 30 × S/(100 × m))`; `m=0` nhận 0, `m>0,k=0` nhận −20. Chỉ tính người đúng hoặc có ít nhất 10000 ms kết nối cộng dồn. Đoán luôn 30 giây, độc lập thời gian vẽ. Xem mục 4 `game_rules_nhom8.md`.
+- Rời phòng: giữ chỗ mất kết nối **30 giây**; chỉ xử lý rời khi hết hạn hoặc người chơi xác nhận rời. Trận đang chơi còn **< 2 người** thì giải tán và hủy kết quả thông thường, giữ điểm phạt/thưởng rời trận. Chủ phòng chỉ chuyển quyền sau khi thực sự rời phòng.
 - Kết thúc: bảng tổng kết (tranh + chủ nhân + ai đoán đúng/sai/timeout), cập nhật điểm tích lũy vào CSDL, bảng xếp hạng toàn hệ thống.
 
 ## 8. Quy tắc lập trình bắt buộc
@@ -117,7 +117,7 @@ Quy ước: tên enum `MessageType` ở `common`, server và client dùng chung.
 2. `WebSocketSession` không thread-safe khi gửi: bọc bằng `ConcurrentWebSocketSessionDecorator` hoặc `synchronized (session)`.
 3. Lưu trạng thái trực tuyến bằng `ConcurrentHashMap` (session, phòng, trận). Mỗi phòng/trận có cơ chế khóa riêng.
 4. Bộ đếm thời gian dùng `ScheduledExecutorService`/`TaskScheduler`; khi hết giờ xử lý tự động (tự chọn từ, tự nộp tranh, đóng lượt đoán).
-5. Mất kết nối (`afterConnectionClosed`) phải xử lý như rời phòng.
+5. Mất kết nối (`afterConnectionClosed`, lỗi transport hoặc heartbeat quá hạn) chuyển sang RECONNECTING trong 30 giây; không xử lý như rời phòng ngay. Khôi phục phải xác thực và nhận snapshot từ Server. Quy tắc chi tiết xem mục 3 trong `game_rules_nhom8.md`.
 6. Mật khẩu băm **BCrypt**, không lưu rõ. Truy vấn qua `JpaRepository` (không nối chuỗi SQL, tránh SQL injection như ví dụ mẫu của giáo trình).
 7. Kiểm tra hợp lệ ở server: đúng pha, đúng người, đúng thời gian trước khi nhận `DRAW_SUBMIT`/`GUESS_SUBMIT`.
 8. Phân tầng: `ws` (nhận/gửi) → `service` (nghiệp vụ) → `repository` (dữ liệu). Mô hình ba tầng như chương 10.

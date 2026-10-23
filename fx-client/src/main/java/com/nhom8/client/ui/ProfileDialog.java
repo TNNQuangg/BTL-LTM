@@ -12,8 +12,6 @@ import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * Hộp thoại Hồ sơ & Chỉnh sửa thông tin cá nhân (Profile & Match History).
@@ -34,8 +32,7 @@ public class ProfileDialog {
     private PasswordField oldPassField;
     private PasswordField newPassField;
     private PasswordField confirmPassField;
-    private String selectedAvatar = "1";
-    private final List<Button> avatarButtons = new ArrayList<>();
+    private AvatarEditor avatarEditor;
 
     // Tab 2: Match History
     public static class MatchHistoryEntry {
@@ -44,6 +41,8 @@ public class ProfileDialog {
         public String startedAt;
         public int pointsDrawn;
         public int pointsGuess;
+        public int pointsAdjustment;
+        public int scoringVersion;
         public int totalPoints;
         public int rank;
         public int totalPlayers;
@@ -178,29 +177,8 @@ public class ProfileDialog {
 
         infoRow.getChildren().addAll(usernameLbl, scoreLbl, statsLbl);
 
-        // Avatar selector
-        Label avatarTitle = new Label("Chọn biểu tượng đại diện:");
-        avatarTitle.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 15px; -fx-font-weight: bold; -fx-text-fill: -fx-ink;");
-
-        HBox avatarBox = new HBox(8);
-        avatarBox.setAlignment(Pos.CENTER_LEFT);
-        String[] icons = {"🎨", "🦊", "🐱", "🐶", "🚀", "👑", "⚡", "🍀"};
-        avatarButtons.clear();
-        for (int i = 0; i < icons.length; i++) {
-            String avId = String.valueOf(i + 1);
-            Button avBtn = new Button(icons[i]);
-            avBtn.setStyle("-fx-font-size: 20px; -fx-padding: 4 10; -fx-cursor: hand; -fx-background-color: white; -fx-border-color: #CCCCCC; -fx-border-radius: 8; -fx-background-radius: 8;");
-            avBtn.setOnAction(e -> {
-                selectedAvatar = avId;
-                updateAvatarButtonStyles();
-                // Tự động lưu avatar mới
-                sendUpdateAvatar(avId);
-            });
-            avatarButtons.add(avBtn);
-            avatarBox.getChildren().add(avBtn);
-        }
-
-        overviewCard.getChildren().addAll(ovTitle, infoRow, createdAtLbl, avatarTitle, avatarBox);
+        avatarEditor = new AvatarEditor(app.getPrimaryStage(), this::sendUpdateAvatar);
+        overviewCard.getChildren().addAll(ovTitle, infoRow, createdAtLbl, avatarEditor);
 
         // 2. Thẻ Đổi tên hiển thị
         VBox nameCard = new VBox(10);
@@ -277,18 +255,6 @@ public class ProfileDialog {
         return box;
     }
 
-    private void updateAvatarButtonStyles() {
-        for (int i = 0; i < avatarButtons.size(); i++) {
-            String avId = String.valueOf(i + 1);
-            Button btn = avatarButtons.get(i);
-            if (avId.equals(selectedAvatar)) {
-                btn.setStyle("-fx-font-size: 20px; -fx-padding: 4 10; -fx-cursor: hand; -fx-background-color: #F5C800; -fx-border-color: -fx-ink; -fx-border-width: 2; -fx-border-radius: 8; -fx-background-radius: 8;");
-            } else {
-                btn.setStyle("-fx-font-size: 20px; -fx-padding: 4 10; -fx-cursor: hand; -fx-background-color: white; -fx-border-color: #CCCCCC; -fx-border-radius: 8; -fx-background-radius: 8;");
-            }
-        }
-    }
-
     // --- TAB 2: MATCH HISTORY ---
     private VBox createHistoryTab() {
         VBox box = new VBox(10);
@@ -352,7 +318,8 @@ public class ProfileDialog {
                     Label totalScoreLbl = new Label(item.totalPoints + " điểm");
                     totalScoreLbl.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: #059669;");
 
-                    Label breakdownLbl = new Label("Vẽ: " + item.pointsDrawn + "đ • Đoán: " + item.pointsGuess + "đ");
+                    Label breakdownLbl = new Label(String.format("Vẽ: %+d • Đoán: %+d • Thưởng/phạt: %+d • Luật v%d",
+                            item.pointsDrawn, item.pointsGuess, item.pointsAdjustment, item.scoringVersion));
                     breakdownLbl.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 12px; -fx-text-fill: #64748B;");
                     scoreBox.getChildren().addAll(totalScoreLbl, breakdownLbl);
 
@@ -370,7 +337,7 @@ public class ProfileDialog {
     // --- ACTIONS & NETWORKING ---
     public void show() {
         if (overlay == null || !overlay.isShowing()) {
-            overlay = ModalOverlay.show(app.getPrimaryStage(), contentRoot, 760, 680, null);
+            overlay = ModalOverlay.show(app.getPrimaryStage(), contentRoot, 760, 680, avatarEditor::discard);
         } else {
             overlay.bringToFront();
         }
@@ -419,6 +386,8 @@ public class ProfileDialog {
             Envelope env = new Envelope(MessageType.UPDATE_PROFILE_REQUEST);
             env.put("newAvatar", avatarId);
             app.getWsClient().send(env);
+        } else {
+            avatarEditor.saveFailed("Mất kết nối máy chủ. Vui lòng kết nối lại rồi lưu ảnh.");
         }
     }
 
@@ -472,8 +441,7 @@ public class ProfileDialog {
                 }
                 String av = env.getString("avatar");
                 if (av != null) {
-                    selectedAvatar = av;
-                    updateAvatarButtonStyles();
+                    avatarEditor.loadSaved(av);
                 }
             }
         });
@@ -482,6 +450,8 @@ public class ProfileDialog {
     public void handleUpdateProfileResponse(Envelope env) {
         Platform.runLater(() -> {
             if (env.isSuccess()) {
+                if (avatarEditor.isSaving() && env.getBoolean("avatarUpdated", false)) avatarEditor.saved(env.getString("avatar"));
+                else avatarEditor.loadSaved(env.getString("avatar"));
                 DoodleDialog.showToast(app.getPrimaryStage(), "✔ " + (env.getContent() != null ? env.getContent() : "Cập nhật thành công!"));
                 if (oldPassField != null) oldPassField.clear();
                 if (newPassField != null) newPassField.clear();
@@ -492,6 +462,7 @@ public class ProfileDialog {
                     app.setCurrentDisplayName(updatedDisplayName);
                 }
             } else {
+                if (avatarEditor.isSaving() && env.getBoolean("avatarUpdated", false)) avatarEditor.saveFailed("Lưu thất bại. Bạn có thể chỉnh ảnh và thử lại.");
                 DoodleDialog.error(app.getPrimaryStage(), "Cập nhật thất bại", env.getContent() != null ? env.getContent() : "Không thể cập nhật thông tin.");
             }
         });
@@ -509,6 +480,8 @@ public class ProfileDialog {
                     entry.startedAt = h.has("startedAt") ? h.get("startedAt").asText() : "";
                     entry.pointsDrawn = h.has("pointsDrawn") ? h.get("pointsDrawn").asInt() : 0;
                     entry.pointsGuess = h.has("pointsGuess") ? h.get("pointsGuess").asInt() : 0;
+                    entry.pointsAdjustment = h.path("pointsAdjustment").asInt(0);
+                    entry.scoringVersion = h.path("scoringVersion").asInt(1);
                     entry.totalPoints = h.has("totalPoints") ? h.get("totalPoints").asInt() : 0;
                     entry.rank = h.has("rank") ? h.get("rank").asInt() : 1;
                     entry.totalPlayers = h.has("totalPlayers") ? h.get("totalPlayers").asInt() : 1;

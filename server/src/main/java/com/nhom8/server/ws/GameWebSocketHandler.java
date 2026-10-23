@@ -24,6 +24,33 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
 
     /** Service xử lý logic nghiệp vụ */
     private final GameService gameService;
+    @org.springframework.beans.factory.annotation.Value("${game.heartbeat-interval-ms:5000}")
+    private long heartbeatInterval = 5000;
+    @org.springframework.beans.factory.annotation.Value("${game.heartbeat-timeout-ms:12000}")
+    private long heartbeatTimeout = 12000;
+    private final java.util.concurrent.ScheduledExecutorService health = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "server-connection-health"); thread.setDaemon(true); return thread;
+    });
+
+    @jakarta.annotation.PostConstruct public void startHealthChecks() {
+        health.scheduleAtFixedRate(() -> {
+            for (ClientSession client : sessions.values()) {
+                if (!client.isConnected()) continue;
+                try {
+                    if (System.currentTimeMillis() - client.getLastPongMillis() > heartbeatTimeout) {
+                        gameService.handleDisconnect(client); client.disconnect();
+                    } else client.ping();
+                } catch (Exception ex) { gameService.handleDisconnect(client); client.disconnect(); }
+            }
+        }, heartbeatInterval, heartbeatInterval, java.util.concurrent.TimeUnit.MILLISECONDS);
+    }
+
+    @jakarta.annotation.PreDestroy public void stopHealthChecks() { health.shutdownNow(); }
+
+    @Override protected void handlePongMessage(WebSocketSession session, org.springframework.web.socket.PongMessage message) {
+        ClientSession client = sessions.get(session.getId());
+        if (client != null) client.receivedPong();
+    }
 
     public GameWebSocketHandler(GameService gameService) {
         this.gameService = gameService;
@@ -53,7 +80,7 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
             if (envelope != null && envelope.getType() != null) {
                 System.out.println("[SERVER] Nhận từ " + clientSession.getDisplayName() + ": " + envelope.getType());
                 try {
-                    dispatchMessage(clientSession, envelope);
+                    gameService.dispatchCurrent(clientSession, envelope, () -> dispatchMessage(clientSession, envelope));
                 } catch (Exception ex) {
                     System.err.println("[SERVER] Lỗi xử lý thông điệp " + envelope.getType()
                             + " từ " + clientSession.getDisplayName() + ": " + ex.getMessage());
@@ -82,6 +109,8 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
         ClientSession clientSession = sessions.get(session.getId());
         if (clientSession != null) {
             System.err.println("[SERVER] Lỗi từ client: " + clientSession.getDisplayName());
+            gameService.handleDisconnect(clientSession);
+            clientSession.disconnect();
         }
     }
 
@@ -134,6 +163,9 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
                 break;
             case STROKE_BATCH:
                 gameService.handleDrawData(handler, envelope);
+                break;
+            case DRAWING_DRAFT_SAVE:
+                gameService.handleDrawingDraft(handler, envelope);
                 break;
             case DRAW_SUBMIT:
                 gameService.handleDrawSubmit(handler, envelope);

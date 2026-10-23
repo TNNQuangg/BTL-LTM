@@ -18,6 +18,8 @@ import javafx.scene.layout.*;
 import javafx.util.Duration;
 
 public class RoomScreen {
+    private final java.util.Map<Label, Long> reconnectLabels = new java.util.HashMap<>();
+    private javafx.animation.Timeline reconnectClock;
     private final MainApplication app;
     private final String roomId;
     private String roomName;
@@ -98,7 +100,7 @@ public class RoomScreen {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        playerCountLabel = new Label("1/6 Người chơi");
+        playerCountLabel = new Label("1/8 Người chơi");
         playerCountLabel.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: -fx-ink;");
 
         topBar.getChildren().addAll(leaveBtn, titleLabel, copyBox, spacer, playerCountLabel);
@@ -170,7 +172,7 @@ public class RoomScreen {
         readyBtn.setStyle("-fx-font-size: 18px; -fx-padding: 8 20;");
         readyBtn.setOnAction(e -> toggleReady());
 
-        Label readyHint = new Label("Cần tối thiểu 2 người sẵn sàng để bắt đầu");
+        Label readyHint = new Label("Phòng 3–8 người; tất cả phải sẵn sàng để bắt đầu");
         readyHint.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 14px; -fx-text-fill: #555555;");
 
         HBox readyBox = new HBox(12, readyBtn, readyHint);
@@ -254,7 +256,7 @@ public class RoomScreen {
                     accept.setDisable(true); decline.setDisable(true);
                     respondFriendRequest(item.username, false);
                 });
-                HBox row = new HBox(10, person, accept, decline);
+                HBox row = new HBox(10, AvatarView.create(item.avatar, 34), person, accept, decline);
                 row.setAlignment(Pos.CENTER_LEFT);
                 row.setPadding(new Insets(8));
                 setGraphic(row);
@@ -334,9 +336,7 @@ public class RoomScreen {
                     } else {
                         avatarPane.setStyle("-fx-background-color: #F1F5F9; -fx-background-radius: 17px; -fx-border-color: #CBD5E1; -fx-border-width: 1.5px; -fx-border-radius: 17px;");
                     }
-                    Label avLabel = new Label(item.isOnline ? "🟢" : "👤");
-                    avLabel.setStyle("-fx-font-size: 14px;");
-                    avatarPane.getChildren().add(avLabel);
+                    avatarPane.getChildren().add(AvatarView.create(item.avatar, 30));
 
                     VBox info = new VBox(2);
                     Label name = new Label(item.getEffectiveName());
@@ -493,9 +493,7 @@ public class RoomScreen {
     }
 
     private void leaveRoom() {
-        Envelope env = new Envelope(MessageType.ROOM_LEAVE);
-        app.getWsClient().send(env);
-        app.showLobbyScreen();
+        app.confirmLeave(false);
     }
 
     private void updateRoomSettings() {
@@ -671,10 +669,11 @@ public class RoomScreen {
 
         int count = env.getInt("playerCount", 1);
         if (playerCountLabel != null) {
-            playerCountLabel.setText(count + "/6 Người chơi");
+            playerCountLabel.setText(count + "/" + env.getInt("maxPlayers", 8) + " Người chơi");
         }
 
         if (env.getData().has("players")) {
+            reconnectLabels.clear();
             playersListVBox.getChildren().clear();
             JsonNode playersNode = env.getData().get("players");
 
@@ -701,6 +700,7 @@ public class RoomScreen {
                 String dName = pNode.has("displayName") ? pNode.get("displayName").asText() : uName;
                 boolean ready = pNode.has("isReady") && pNode.get("isReady").asBoolean();
                 boolean host = pNode.has("isHost") && pNode.get("isHost").asBoolean();
+                boolean connected = pNode.path("connected").asBoolean(true);
 
                 HBox card = new HBox(12);
                 card.setAlignment(Pos.CENTER_LEFT);
@@ -712,7 +712,14 @@ public class RoomScreen {
                 HBox.setHgrow(nameLbl, Priority.ALWAYS);
 
                 Label statusBadge = new Label();
-                if (host) {
+                if (!connected) {
+                    long deadline = pNode.path("reconnectDeadline").asLong(0);
+                    long localDeadline = System.currentTimeMillis() + deadline - env.getData().path("serverTime").asLong(System.currentTimeMillis());
+                    reconnectLabels.put(statusBadge, localDeadline);
+                    statusBadge.setText("⚠ Đang kết nối lại... " + Math.max(0, (localDeadline - System.currentTimeMillis() + 999) / 1000) + "s");
+                    card.setOpacity(.55);
+                    statusBadge.setStyle("-fx-background-color: #FFF3CD; -fx-text-fill: #856404; -fx-font-weight: bold; -fx-padding: 4 10; -fx-background-radius: 12;");
+                } else if (host) {
                     statusBadge.setText(ready ? "👑 SẴN SÀNG" : "👑 CHỦ PHÒNG");
                     statusBadge.setStyle("-fx-background-color: #FFF3CD; -fx-text-fill: #856404; -fx-font-weight: bold; -fx-padding: 4 10; -fx-background-radius: 12;");
                 } else if (ready) {
@@ -723,7 +730,7 @@ public class RoomScreen {
                     statusBadge.setStyle("-fx-background-color: #E2E3E5; -fx-text-fill: #383D41; -fx-font-weight: bold; -fx-padding: 4 10; -fx-background-radius: 12;");
                 }
 
-                card.getChildren().addAll(nameLbl, statusBadge);
+                card.getChildren().addAll(AvatarView.create(pNode.path("avatar").asText("1"), 36), nameLbl, statusBadge);
 
                 // Nút kick người chơi (chỉ chủ phòng thấy và không thể tự kick mình)
                 if (isCurrentUserHost && myUser != null && !uName.equalsIgnoreCase(myUser)) {
@@ -735,6 +742,15 @@ public class RoomScreen {
 
                 playersListVBox.getChildren().add(card);
             });
+            if (reconnectClock == null) {
+                reconnectClock = new javafx.animation.Timeline(new javafx.animation.KeyFrame(javafx.util.Duration.seconds(1), event -> {
+                    if (scene != app.getPrimaryStage().getScene() || reconnectLabels.isEmpty()) { reconnectClock.stop(); return; }
+                    reconnectLabels.forEach((label, deadline) -> label.setText("⚠ Đang kết nối lại... "
+                            + Math.max(0, (deadline - System.currentTimeMillis() + 999) / 1000) + "s"));
+                }));
+                reconnectClock.setCycleCount(javafx.animation.Timeline.INDEFINITE);
+            }
+            if (!reconnectLabels.isEmpty() && scene == app.getPrimaryStage().getScene()) reconnectClock.play();
         }
     }
 

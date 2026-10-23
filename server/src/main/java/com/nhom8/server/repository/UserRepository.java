@@ -43,4 +43,13 @@ public interface UserRepository extends JpaRepository<User, Integer> {
     @org.springframework.transaction.annotation.Transactional
     @Query("UPDATE User u SET u.rankingScore = u.rankingScore + :points WHERE u.userId = :userId")
     void addRankingScore(@Param("userId") Integer userId, @Param("points") int points);
+
+    /** Trừ điểm người rời và thưởng người còn lại trong cùng một thao tác nguyên tử. */
+    @Modifying
+    @org.springframework.transaction.annotation.Transactional
+    @Query("UPDATE User u SET u.rankingScore = COALESCE(u.rankingScore, 0) + "
+            + ":points * CASE WHEN u.userId = :leaverId THEN -1 ELSE 1 END "
+            + "WHERE u.userId = :leaverId OR u.userId IN :remainingIds")
+    int applyLeaveScores(@Param("leaverId") Integer leaverId, @Param("remainingIds") List<Integer> remainingIds,
+                         @Param("points") int points);
 }

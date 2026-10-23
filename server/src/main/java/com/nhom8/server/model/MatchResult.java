@@ -33,6 +33,9 @@ public class MatchResult implements Serializable {
     @Column(name = "points_guess")
     private Integer pointsGuess = 0;
 
+    @Column(name = "points_adjustment", nullable = false, columnDefinition = "integer default 0")
+    private Integer pointsAdjustment = 0;
+
     public MatchResult() {}
 
     public MatchResult(Match match, User user) {
@@ -52,8 +55,12 @@ public class MatchResult implements Serializable {
     public void setPointsGuess(Integer pointsGuess) { this.pointsGuess = pointsGuess; }
 
     public int getTotalPoints() {
-        return (pointsDrawn != null ? pointsDrawn : 0) + (pointsGuess != null ? pointsGuess : 0);
+        return getGameplayPoints() + getPointsAdjustment();
     }
+
+    public int getGameplayPoints() { return (pointsDrawn == null ? 0 : pointsDrawn) + (pointsGuess == null ? 0 : pointsGuess); }
+    public int getPointsAdjustment() { return pointsAdjustment == null ? 0 : pointsAdjustment; }
+    public void addAdjustmentPoints(int points) { pointsAdjustment = getPointsAdjustment() + points; }
 
     public void addGuessPoints(int points) {
         this.pointsGuess = (this.pointsGuess != null ? this.pointsGuess : 0) + points;

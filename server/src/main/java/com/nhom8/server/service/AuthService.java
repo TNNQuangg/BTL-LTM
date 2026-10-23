@@ -119,7 +119,7 @@ public class AuthService {
         }
         username = username.trim();
 
-        if (userRepository.findByUsername(username) != null) {
+        if (userRepository.findByUsernameIgnoreCase(username) != null) {
             throw new IllegalArgumentException("Tên đăng nhập đã được sử dụng.");
         }
         if (password == null || password.length() < 4 || password.length() > 64) {
@@ -152,6 +152,9 @@ public class AuthService {
     }
 
     public User updateProfile(String username, String newDisplayName, String newAvatar, String oldPassword, String newPassword) {
+        if (newAvatar != null && !newAvatar.isBlank()) {
+            newAvatar = com.nhom8.server.util.AvatarValidator.validate(newAvatar);
+        }
         User user = getProfile(username);
         if (user == null) {
             throw new IllegalArgumentException("Không tìm thấy thông tin tài khoản: " + username);

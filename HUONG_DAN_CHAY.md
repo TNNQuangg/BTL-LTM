@@ -79,27 +79,21 @@ Nếu Maven báo thiếu thông điệp mới trong module `common` sau khi cậ
 
 Cửa sổ giao diện đăng nhập với phong cách nét vẽ tay Doodle (sắc vàng `#F5C800`, nút bấm hình cây bút chì, font Amatic SC & Patrick Hand) sẽ xuất hiện.
 
-### 👤 Danh sách tài khoản thử nghiệm có sẵn (Mật khẩu: `123456`):
-Tất cả tài khoản dưới đây đã được khởi tạo và đồng bộ sẵn với mật khẩu **`123456`**:
+### 👤 Tài khoản thử nghiệm
 
-| Tên đăng nhập | Mật khẩu | Tên hiển thị | Vai trò |
-|---|---|---|---|
-| `admin` | `123456` | Quản Trị Viên | ADMIN |
-| `123456` | `123456` | vuhuy | USER |
-| `vuhuy` | `123456` | Vũ Huy | USER |
-| `playerone` | `123456` | PlayerOne | USER |
-| `testuser` | `123456` | Test User | USER |
-| `player1` | `123456` | Người Chơi 1 | USER |
-| `player2` | `123456` | Người Chơi 2 | USER |
-| `player3` | `123456` | Người Chơi 3 | USER |
-
-*(Bạn cũng có thể chuyển sang tab **Đăng ký tài khoản** để tạo thêm tài khoản mới bất kỳ lúc nào)*
+Trên database mới không có tài khoản tạo sẵn. Chọn **Đăng ký tài khoản** để tạo ít nhất ba người chơi. Seed demo chỉ dùng trong môi trường phát triển/kiểm thử khi đặt `GAME_DEMO_SEED_ENABLED=true`; không bật trên máy chủ công khai. Database cũ có thể vẫn còn tài khoản demo đã tạo trước đây; hãy đổi mật khẩu các tài khoản ấy. Tự đăng ký tên `admin` không được cấp quyền quản trị.
 
 ---
 
 ## 4. Hướng dẫn Test nhiều người chơi (Multi-player)
 
-Luật chơi hỗ trợ từ **3 đến 6 người chơi** trong cùng một phòng:
+Luật chơi hỗ trợ từ **3 đến 8 người chơi** trong cùng một phòng. Phòng chờ có thể có 1–2 người, nhưng phải đủ ít nhất 3 người và tất cả sẵn sàng mới bắt đầu; phòng đủ 8 người sẽ không nhận thêm thành viên. Luật chi tiết được cập nhật tại [game_rules_nhom8.md](game_rules_nhom8.md).
+
+Các trận mới dùng điểm theo thời gian (phiên bản 2): đúng ở giây 2 nhận 95 điểm, giây 15 nhận 60, giây 20 nhận 47. Thứ tự đoán không quyết định điểm. Lượt đoán luôn 30 giây; điểm người vẽ phụ thuộc tỷ lệ đúng và tốc độ, chỉ tính người đã đúng hoặc có tổng thời gian kết nối ít nhất 10 giây trong lượt. Xem mục 4 trong file luật để biết toàn bộ công thức, ví dụ và các trường hợp không bị phạt. Lịch sử cũ và điểm tích lũy được giữ nguyên.
+
+Nếu mất mạng, client tự kết nối lại và hiển thị thời gian giữ chỗ ước tính. Server giữ vị trí trong **30 giây từ lúc xác nhận mất kết nối**; trận vẫn chạy. Trở lại đúng hạn sẽ khôi phục pha hiện tại và bản nháp riêng. Hết hạn sẽ bị loại khỏi phòng, chỉ được tự vào lại khi phòng ở WAITING và còn chỗ. Trận đang diễn ra tiếp tục với ít nhất 2 thành viên hợp lệ. Xem mục 3 trong file luật để biết quy tắc tranh bị bỏ qua và điểm phạt.
+
+Cấu hình server trong `server/src/main/resources/application.properties`: `game.reconnect-grace-ms=30000`, `game.heartbeat-interval-ms=5000`, `game.heartbeat-timeout-ms=12000`. Client có thể cấu hình JVM bằng `game.heartbeat.interval.ms` và `game.heartbeat.timeout.ms`; thời hạn giữ chỗ luôn do server quyết định. Reconnect/bản nháp đang được giữ trong bộ nhớ, không khôi phục trận qua lần khởi động lại server.
 
 1. **Mở thêm màn hình người chơi:**
    - Mở thêm các cửa sổ Terminal mới và chạy lại lệnh:

@@ -24,12 +24,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
 public class GameIntegrationTest {
+    private static final java.util.Set<String> BOT_ANSWERS = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     @LocalServerPort
     private int port;
 
     @Test
     public void testAutoPlayBotSimulation() throws Exception {
+        BOT_ANSWERS.clear();
         System.out.println("Starting full integration test: 3 Bots playing automatically");
         int NUM_BOTS = 3;
         List<BotClient> bots = new ArrayList<>();
@@ -135,6 +137,8 @@ public class GameIntegrationTest {
         private String username;
         private String password;
         private WebSocketSession session;
+        private volatile String drawingId;
+        private volatile String guessDrawingId;
         private BlockingQueue<Envelope> receivedMessages = new LinkedBlockingQueue<>();
         private List<Envelope> allMessages = new java.util.concurrent.CopyOnWriteArrayList<>();
 
@@ -157,19 +161,21 @@ public class GameIntegrationTest {
         protected void handleTextMessage(WebSocketSession session, TextMessage message) {
             Envelope env = JsonUtil.fromJson(message.getPayload(), Envelope.class);
             if (env != null) {
+                if (env.getString("drawingId") != null) drawingId = env.getString("drawingId");
                 receivedMessages.offer(env);
                 allMessages.add(env);
                 
                 if (env.getType() == MessageType.GUESS_START) {
+                    guessDrawingId = env.getString("drawingId");
                     try {
-                        sendGuess("con chó");
-                        sendGuess("con mèo");
+                        for (String answer : BOT_ANSWERS) sendGuess(answer);
                     } catch (Exception e) {}
                 }
             }
         }
 
         public void send(Envelope envelope) throws Exception {
+            if (envelope.getType() == MessageType.DRAW_SUBMIT || envelope.getType() == MessageType.STROKE_BATCH) envelope.put("drawingId", drawingId);
             if (session != null && session.isOpen()) {
                 session.sendMessage(new TextMessage(JsonUtil.toJson(envelope)));
             }
@@ -203,6 +209,7 @@ public class GameIntegrationTest {
         }
 
         public void sendTopicSelect(String topic) throws Exception {
+            BOT_ANSWERS.add(topic);
             Envelope env = new Envelope(MessageType.TOPIC_SELECT);
             env.put("topic", topic);
             send(env);
@@ -216,6 +223,7 @@ public class GameIntegrationTest {
 
         public void sendGuess(String guess) throws Exception {
             Envelope env = new Envelope(MessageType.GUESS_SUBMIT);
+            env.put("drawingId", guessDrawingId);
             env.setContent(guess);
             send(env);
         }

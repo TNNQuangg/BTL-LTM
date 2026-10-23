@@ -32,6 +32,9 @@ public class Match implements Serializable {
     @Column(name = "ended_at")
     private LocalDateTime endedAt;
 
+    @Column(name = "scoring_version", nullable = false, columnDefinition = "integer default 1")
+    private Integer scoringVersion = 1;
+
     @OneToMany(mappedBy = "match", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<MatchResult> results = new ArrayList<>();
 
@@ -44,6 +47,7 @@ public class Match implements Serializable {
     public Match(String roomId) {
         this.roomId = roomId;
         this.startedAt = LocalDateTime.now();
+        this.scoringVersion = com.nhom8.server.service.ScoringService.VERSION;
     }
 
     public Integer getMatchId() { return matchId; }
@@ -54,6 +58,7 @@ public class Match implements Serializable {
     public void setStartedAt(LocalDateTime startedAt) { this.startedAt = startedAt; }
     public LocalDateTime getEndedAt() { return endedAt; }
     public void setEndedAt(LocalDateTime endedAt) { this.endedAt = endedAt; }
+    public int getScoringVersion() { return scoringVersion == null ? 1 : scoringVersion; }
     public List<MatchResult> getResults() { return results; }
     public void setResults(List<MatchResult> results) { this.results = results; }
     public List<Painting> getPaintings() { return paintings; }

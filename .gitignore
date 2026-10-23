@@ -19,7 +19,13 @@ target/
 dist/
 build/
 .env
+.env.*
+!.env.example
 /server/data/
+node_modules/
+*.log
+*.trace.db
+*.mv.db
 
 # OS generated files
 .DS_Store

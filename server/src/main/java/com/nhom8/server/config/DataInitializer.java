@@ -5,15 +5,15 @@ import com.nhom8.server.repository.UserRepository;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 import java.time.LocalDateTime;
 
 /**
- * Tự động đồng bộ và khởi tạo các tài khoản demo / kiểm thử khi Server khởi động.
- * Đảm bảo mọi tài khoản (admin, testuser, playerone, vuhuy, 123456,...) luôn sẵn sàng
- * với mật khẩu chuẩn "123456" cho dù chạy trên H2 Database hay MySQL.
+ * Tài khoản mẫu chỉ được tạo khi game.demo-seed.enabled=true.
  */
 @Component
+@ConditionalOnProperty(name = "game.demo-seed.enabled", havingValue = "true")
 public class DataInitializer implements CommandLineRunner {
 
     private final UserRepository userRepository;

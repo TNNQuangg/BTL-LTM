@@ -2,6 +2,7 @@ package com.nhom8.client;
 
 import javafx.application.Application;
 import javafx.application.Platform;
+import javafx.animation.PauseTransition;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
@@ -15,6 +16,7 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.scene.text.Font;
 import javafx.stage.Stage;
+import javafx.util.Duration;
 
 import com.nhom8.client.ui.DoodleDialog;
 import com.nhom8.client.ui.AdminScreen;
@@ -36,9 +38,20 @@ public class MainApplication extends Application {
     private String currentRole = "USER";
     private AdminScreen adminScreen;
     private String lastEnteredUsername = "";
+    private String lastEnteredPassword = "";
     private String lastRegisteredUsername = "";
     private String lastRegisteredPassword = "";
     private Envelope lastRoomUpdate;
+    private boolean reconnecting;
+    private long reconnectDeadlineMillis;
+    private PauseTransition reconnectRetry;
+    private boolean reconnectAttemptInFlight;
+    private int reconnectAttempts;
+    private String resumeToken;
+    private String resumeRoomId;
+    private long graceMillis = 30_000;
+    private com.nhom8.client.ui.ReconnectOverlay reconnectOverlay;
+    private GameScreen.DraftRecovery localDraft;
 
     private ProfileDialog profileDialog;
 
@@ -350,10 +363,13 @@ public class MainApplication extends Application {
         if (webSocketClient != null && serverUrl.equals(connectedServerUrl)) return;
         if (webSocketClient != null) webSocketClient.close();
         webSocketClient = new GameWebSocketClient(serverUrl, envelope -> Platform.runLater(() -> handleMessage(envelope)));
+        webSocketClient.setDisconnectHandler(() -> Platform.runLater(this::handleSocketDisconnected));
         connectedServerUrl = serverUrl;
     }
 
     private void connectAndLogin(String username, String password) {
+        lastEnteredUsername = username;
+        lastEnteredPassword = password;
         ensureWebSocketClient();
 
         webSocketClient.connect().thenAccept(ws -> {
@@ -372,6 +388,63 @@ public class MainApplication extends Application {
                 });
             }
         });
+    }
+
+    private void handleSocketDisconnected() {
+        if (reconnecting || currentUsername == null || currentUsername.isBlank()
+                || lastEnteredUsername.isBlank() || lastEnteredPassword.isBlank()) return;
+        reconnecting = true;
+        if (gameScreen != null) localDraft = gameScreen.captureDraft();
+        reconnectDeadlineMillis = System.currentTimeMillis() + graceMillis;
+        reconnectAttempts = 0;
+        resumeRoomId = lastRoomUpdate == null ? null : lastRoomUpdate.getString("roomId");
+        reconnectOverlay = new com.nhom8.client.ui.ReconnectOverlay(primaryStage.getScene(), reconnectDeadlineMillis, this::attemptReconnect);
+        attemptReconnect();
+    }
+
+    private void attemptReconnect() {
+        if (!reconnecting || reconnectAttemptInFlight) return;
+        reconnectAttemptInFlight = true;
+        reconnectAttempts++;
+        if (reconnectRetry != null) reconnectRetry.stop();
+        if (reconnectOverlay != null) reconnectOverlay.setStatus("Đang thử kết nối lần " + reconnectAttempts + "…");
+        ensureWebSocketClient();
+        webSocketClient.connect().thenAccept(ws -> Platform.runLater(() -> {
+            if (!reconnecting) return;
+            if (ws != null) {
+                Envelope login = new Envelope(MessageType.LOGIN);
+                login.put("username", lastEnteredUsername);
+                login.put("password", lastEnteredPassword);
+                login.putBoolean("resume", true);
+                login.put("resumeToken", resumeToken);
+                login.put("resumeRoomId", resumeRoomId);
+                webSocketClient.send(login);
+                reconnectRetry = new PauseTransition(Duration.seconds(5));
+                reconnectRetry.setOnFinished(event -> {
+                    if (!reconnecting) return;
+                    webSocketClient.close(); reconnectAttemptInFlight = false; scheduleReconnectRetry();
+                });
+                reconnectRetry.playFromStart();
+            } else {
+                reconnectAttemptInFlight = false;
+                scheduleReconnectRetry();
+            }
+        }));
+    }
+
+    private void scheduleReconnectRetry() {
+        if (!reconnecting) return;
+        if (reconnectRetry != null) reconnectRetry.stop();
+        reconnectRetry = new PauseTransition(Duration.millis(Math.min(4000, 500L << Math.min(3, reconnectAttempts))));
+        reconnectRetry.setOnFinished(event -> attemptReconnect());
+        reconnectRetry.playFromStart();
+    }
+
+    private void stopReconnectAttempts() {
+        reconnecting = false;
+        reconnectAttemptInFlight = false;
+        if (reconnectRetry != null) reconnectRetry.stop();
+        if (reconnectOverlay != null) { reconnectOverlay.close(); reconnectOverlay = null; }
     }
 
     private void connectAndRegister(String username, String password, String displayName) {
@@ -433,8 +506,27 @@ public class MainApplication extends Application {
     }
 
     private void handleMessage(Envelope envelope) {
+        if (reconnecting && envelope.getType() != MessageType.LOGIN_RESULT && envelope.getType() != MessageType.LOGIN_RESPONSE
+                && envelope.getType() != MessageType.SESSION_REPLACED) return;
+        if (envelope.getType() == MessageType.GAME_START || envelope.getType() == MessageType.MATCH_START) {
+            showGameScreen(resumeRoomId, envelope); return;
+        }
+        if (envelope.getType() == MessageType.SESSION_REPLACED) {
+            returnToLogin(envelope.getContent()); return;
+        }
+        if (envelope.getType() == MessageType.GAME_STATE_SNAPSHOT) {
+            var events = envelope.getData().path("events");
+            for (var event : events) handleMessage(Envelope.fromJson(event.toString()));
+            if (gameScreen != null && envelope.getData().has("players"))
+                gameScreen.handleMessage(new Envelope(MessageType.ROOM_UPDATE).put("players", envelope.getData().get("players")));
+            return;
+        }
         if (envelope.getType() == MessageType.LOGIN_RESULT || envelope.getType() == MessageType.LOGIN_RESPONSE) {
             if (envelope.isSuccess()) {
+                boolean wasReconnecting = reconnecting;
+                stopReconnectAttempts();
+                resumeToken = envelope.getString("resumeToken");
+                graceMillis = envelope.getData().path("graceMillis").asLong(30_000);
                 if (envelope.getData() != null && envelope.getData().has("player")) {
                     com.fasterxml.jackson.databind.JsonNode playerNode = envelope.getData().get("player");
                     if (playerNode.has("username")) currentUsername = playerNode.get("username").asText();
@@ -450,13 +542,29 @@ public class MainApplication extends Application {
                 gameScreen = null;
                 adminScreen = null;
                 if (statusLabel != null) statusLabel.setText("");
-                showLobbyScreen();
+                if (envelope.getBoolean("reconnected", false)) {
+                    showRoomScreen(envelope.getString("roomId"), envelope.getString("roomName"));
+                    if (wasReconnecting) DoodleDialog.showToast(primaryStage, "Đã kết nối lại thành công!");
+                } else {
+                    showLobbyScreen();
+                    if (wasReconnecting) {
+                        String previousRoomId = envelope.getString("previousRoomId");
+                        if (envelope.getBoolean("canRejoin", false)) {
+                            DoodleDialog.confirm(primaryStage, "Đã hết thời gian kết nối lại",
+                                    "Bạn đã bị đưa ra khỏi phòng do mất kết nối quá 30 giây.", "Vào lại phòng", "Về sảnh chính", yes -> {
+                                        if (yes) webSocketClient.send(new Envelope(MessageType.ROOM_JOIN).put("roomId", previousRoomId));
+                                    });
+                        } else DoodleDialog.info(primaryStage, "Đã hết thời gian kết nối lại",
+                                "Bạn đã bị đưa ra khỏi phòng do mất kết nối quá 30 giây hoặc phòng không còn tồn tại. Bạn đã về sảnh chính.");
+                    }
+                }
             } else {
                 // The server sends a failed LOGIN_RESULT to an existing session
                 // when the same account logs in from another device. That session
                 // may already be showing the lobby, room, or game screen, so move
                 // it back to login instead of leaving a stale authenticated UI up.
                 if (currentUsername != null && !currentUsername.isBlank()) {
+                    stopReconnectAttempts();
                     returnToLogin(envelope.getContent() != null
                             ? envelope.getContent()
                             : "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
@@ -486,6 +594,7 @@ public class MainApplication extends Application {
                 DoodleDialog.error(primaryStage, "Đăng ký thất bại", envelope.getContent());
             }
         } else if (envelope.getType() == MessageType.ROOM_DISSOLVED) {
+            lastRoomUpdate = null;
             DoodleDialog.info(primaryStage, "Phòng giải tán", envelope.getContent() != null ? envelope.getContent() : "Phòng đã bị giải tán.");
             showLobbyScreen();
         } else if (envelope.getType() == MessageType.ROOM_PASSWORD_REQUIRED) {
@@ -631,6 +740,7 @@ public class MainApplication extends Application {
     }
 
     public void showLobbyScreen() {
+        lastRoomUpdate = null;
         if (lobbyScreen == null) {
             lobbyScreen = new LobbyScreen(this);
         }
@@ -649,6 +759,7 @@ public class MainApplication extends Application {
 
     /** Clears the local authenticated state and returns the user to the login form. */
     public void returnToLogin(String message) {
+        stopReconnectAttempts();
         if (webSocketClient != null) {
             webSocketClient.close();
         }
@@ -679,6 +790,7 @@ public class MainApplication extends Application {
     }
 
     public void showRoomScreen(String roomId, String roomName) {
+        resumeRoomId = roomId;
         roomScreen = new com.nhom8.client.ui.RoomScreen(this, roomId, roomName);
         Scene scene = roomScreen.createScene();
         applyTheme(scene);
@@ -697,6 +809,18 @@ public class MainApplication extends Application {
         Scene scene = gameScreen.createScene();
         applyTheme(scene);
         primaryStage.setScene(scene);
+    }
+
+    public GameScreen.DraftRecovery getLocalDraft() { return localDraft; }
+
+    public void confirmLeave(boolean activeMatch) {
+        DoodleDialog.confirm(primaryStage, "Rời phòng?", activeMatch
+                        ? "Rời trận ngay sẽ bị trừ 20 điểm. Bạn có chắc muốn rời phòng?" : "Bạn có chắc muốn rời phòng?",
+                "Rời phòng", "Ở lại", yes -> {
+                    if (!yes || webSocketClient == null || !webSocketClient.isConnected()) return;
+                    webSocketClient.send(new Envelope(MessageType.ROOM_LEAVE));
+                    localDraft = null; lastRoomUpdate = null; resumeRoomId = null; showLobbyScreen();
+                });
     }
 
     public void showGameScreen(String roomId, Envelope startMessage) {

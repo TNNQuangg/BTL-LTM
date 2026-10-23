@@ -1,3 +1,5 @@
+Quy ước cập nhật: Đây là tài liệu luật chơi chính. Mọi thay đổi luật/rule theo yêu cầu người dùng phải được cập nhật vào file này cùng lúc với code và thông báo giao diện liên quan.
+
 1. Mô tả Kiến trúc chung của hệ thống
 1.1. Mô hình kiến trúc Client-Server
 Hệ thống "Game Vẽ Hình Đoán Ý" được xây dựng theo mô hình kiến trúc Client-Server hiện đại, chia tách rõ ràng trách nhiệm giữa máy chủ trung tâm và các ứng dụng khách:
@@ -24,7 +26,7 @@ Kết nối Mạng
 Truyền dữ liệu real-time hai chiều giữa Server và Client (hình vẽ, đáp án, trạng thái phòng, tin nhắn). Hỗ trợ cả cơ chế Request-Response (Client → Server) và Push/Broadcast (Server → Client) để đồng bộ trạng thái phòng và chat.
 Module tính điểm
 Xử lý nghiệp vụ điểm
-Áp dụng thuật toán tính điểm người đoán dựa trên thứ hạng thời gian đoán đúng: Điểm(r) = 100 - (r-1) × [80/(m-1)]; và điểm người vẽ dựa trên tỷ lệ người đoán thành công: (số người đoán đúng / tổng số người đoán) × 100. Nếu không có ai đoán đúng, người vẽ sẽ bị trừ 20 điểm.
+Điểm đoán dựa trên thời gian máy chủ chấp nhận đáp án đúng đầu tiên: round(20 + 80 × (30000 − t) / 30000). Điểm vẽ kết hợp 70% tỷ lệ đoán đúng và 30% tốc độ đoán: round(70 × k/m + 30 × S/(100 × m)). Chỉ tính người đủ điều kiện; không có người đủ cơ hội đoán thì không phạt. Công thức, ví dụ và ngoại lệ tại mục 4.
 
 1.3. Luồng dữ liệu chính trong hệ thống
 Đăng nhập & Xác thực: Client gửi thông tin tài khoản → Server xác thực thông tin với Cơ sở dữ liệu → Server khởi tạo phiên làm việc, trả về kết quả đăng nhập kèm danh sách người chơi đang online.
@@ -41,12 +43,12 @@ Module Xác thực (Authentication): Quản lý toàn bộ quy trình đăng ký
 Module Quản lý người chơi (Player Management): Theo dõi danh sách người chơi online/offline, cập nhật trạng thái (rỗi, trong phòng, đang đấu), quản lý hồ sơ cá nhân, cấp độ và điểm số tích lũy.
 Module Xã hội (Social): Quản lý các mối quan hệ bạn bè, gửi/nhận lời mời kết bạn, tìm kiếm người chơi, xem profile chi tiết và lịch sử các trận đấu đã tham gia.
 Module Giao tiếp (Chat): Đảm nhận hai kênh giao tiếp riêng biệt: Kênh chat cá nhân (Private Chat 1-1 giữa bạn bè, có lưu lịch sử) và Kênh chat phòng (Room Chat dành cho thành viên phòng chờ).
-Module Quản lý phòng chơi (Room Management): Xử lý việc tạo phòng, tìm phòng, vào/ra phòng. Kiểm tra điều kiện bắt đầu (3–6 người, 100% sẵn sàng). Xử lý sự cố mất kết nối hoặc thoát đột ngột (giải tán phòng nếu còn dưới 3 người, tự động chuyển quyền chủ phòng cho thành viên tiếp theo).
+Module Quản lý phòng chơi (Room Management): Xử lý việc tạo phòng, tìm phòng, vào/ra phòng. Kiểm tra điều kiện bắt đầu (3–8 người đang kết nối, 100% sẵn sàng). Phòng chờ có thể có 1–2 người nhưng chưa được bắt đầu trận đấu. Không nhận thêm người khi phòng đã đủ 8 người, kể cả các vị trí được giữ trong 30 giây mất kết nối. Trận đang chơi tiếp tục khi còn ít nhất 2 thành viên hợp lệ; chỉ chuyển quyền chủ phòng khi người đó xác nhận rời phòng hoặc hết hạn khôi phục.
 Module Trận đấu (Game Engine): Đóng vai trò bộ máy điều phối luồng chơi: trích xuất bộ từ khóa ngẫu nhiên từ CSDL (tối thiểu 3 × số người chơi), quản lý bộ đếm thời gian chọn từ (10s), thời gian vẽ (60s) và thời gian đoán (30s/bức tranh), kiểm soát việc nộp tranh tự động khi hết giờ.
 Module Vẽ tranh (Drawing): Cung cấp bộ công cụ vẽ phong phú trên canvas Client (bút vẽ, tẩy, chọn màu, kích thước nét vẽ, xóa tất cả) và đóng gói dữ liệu hình vẽ chuyển về Server.
 Module Đoán đáp án (Guessing): Hiển thị tranh vẽ kèm gợi ý dạng gạch dưới độ dài đáp án. Xử lý nhận đáp án nhập từ người chơi, đối chiếu với đáp án gốc và phản hồi kết quả chính xác ngay lập tức.
-Module Tính điểm (Scoring): Thực thi công thức tính điểm chính xác: Người đoán đúng nhận Điểm(r) = 100 - (r-1) × [80/(m-1)] (tối thiểu 20 điểm); Người vẽ nhận điểm = (số người đoán đúng / tổng số người đoán) × 100 (nếu không có ai đoán đúng, người vẽ bị trừ 20 điểm).
-Điểm phạt cho người vẽ: Trong trường hợp không có người chơi nào đoán đúng đáp án của bức tranh, người vẽ sẽ bị trừ 20 điểm.
+Module Tính điểm (Scoring): Dùng công thức thời gian và tỷ lệ/tốc độ tại mục 4. Thứ tự đoán đúng chỉ phục vụ hiển thị, không quyết định điểm. Kết quả có thể bằng điểm nhau. Server theo dõi tổng thời gian kết nối của từng người trong mỗi lượt để xác định cơ hội đoán hợp lệ.
+Điểm phạt cho người vẽ: Chỉ phạt 20 điểm khi tranh được chiếu hợp lệ, có ít nhất một người đủ điều kiện đoán nhưng không ai đoán đúng; tranh SKIPPED và trường hợp không có người đủ cơ hội đoán không bị phạt.
 Module Kết quả & Xếp hạng (Results & Ranking): Hiển thị bảng tổng kết chi tiết sau trận đấu và quản lý Bảng xếp hạng toàn hệ thống theo điểm tích lũy người chơi.
 2.2. Thiết kế giao diện tổng quan
 Màn hình Đăng nhập / Đăng ký: Giao diện cho phép nhập tài khoản, mật khẩu, chuyển đổi đăng ký tài khoản mới và khôi phục mật khẩu.
@@ -58,17 +60,105 @@ Màn hình Đoán tranh: Trình chiếu bức tranh vẽ, gợi ý số ký tự
 Màn hình Kết quả trận đấu: Bảng vinh danh thứ hạng trận đấu, tổng điểm từng người chơi thu được và danh sách chi tiết các bức tranh trong lượt.
 Màn hình Bảng xếp hạng: Bảng tổng hợp điểm tích lũy toàn hệ thống, xếp hạng danh hiệu người chơi.
 2.3. Các quy tắc nghiệp vụ quan trọng
-Quy mô phòng chơi: Tối thiểu 3 người chơi và tối đa 6 người chơi trong một phòng.
+Quy mô phòng chơi: Tối thiểu 3 người đang kết nối để bắt đầu và tối đa 8 người chơi trong một phòng. Trận đang chơi được tiếp tục khi còn ít nhất 2 thành viên hợp lệ (bao gồm thành viên đang được giữ chỗ trong thời hạn khôi phục). Phòng chờ được phép có 1–2 người trong khi chờ đủ người; người thứ 9 không được tham gia phòng.
 Điều kiện bắt đầu: Trận đấu chỉ được khởi tạo khi 100% thành viên trong phòng nhấn Sẵn sàng.
 Quy tắc chọn từ khóa: Mỗi người nhận 3 từ khóa gợi ý riêng không trùng lắp trong cùng phòng, có 10 giây để chọn (quá giờ Server tự chọn).
 Pha vẽ tranh: Thời gian tối đa 60 giây. Không được dùng chữ hoặc số để trực tiếp ghi đáp án lên tranh vẽ.
 Pha đoán tranh: Thời gian 30 giây cho mỗi bức tranh. Người đoán được phép nhập và gửi đáp án nhiều lần.
 Quyền đoán: Tác giả của bức tranh không được tham gia đoán bức tranh do chính mình vẽ.
 Gợi ý đáp án: Hệ thống hiển thị dạng gạch dưới tương ứng với độ dài và số lượng từ của đáp án (ví dụ: "___ ____" cho "con mèo").
-Xử lý người chơi rời trận giữa chừng: Người rời trận (chủ động thoát hoặc mất kết nối) bị trừ 20 điểm xếp hạng; mỗi người còn lại trong phòng được cộng 20 điểm. Nếu số người còn lại dưới mức tối thiểu 2 người, trận đấu bị hủy phần kết quả thông thường; điểm phạt/thưởng rời trận vẫn được giữ.
-Chuyển quyền chủ phòng: Khi chủ phòng rời đi hoặc mất kết nối, Server tự động chuyển giao quyền chủ phòng cho người tiếp theo trong danh sách.
-Tự động nộp bài: Nếu hết 60 giây vẽ mà người chơi chưa chọn Gửi, Server sẽ tự động lấy dữ liệu canvas hiện tại làm bản nộp chính thức.
+Xử lý người chơi rời trận giữa chừng: Người xác nhận rời trận hoặc hết hạn mất kết nối 30 giây trong khi trận còn diễn ra bị trừ 20 điểm xếp hạng; mỗi thành viên hợp lệ còn lại trong phòng được cộng 20 điểm. Mỗi lần rời trận chỉ áp dụng điểm phạt/thưởng một lần. Nếu số người còn lại dưới 2 người, phòng đang chơi bị giải tán và trận đấu bị hủy phần kết quả thông thường; điểm phạt/thưởng rời trận vẫn được giữ. Không phạt khi trở lại đúng hạn hoặc mất kết nối ở phòng chờ; không phạt bỏ trận hồi tố nếu trận đã kết thúc bình thường trước lúc hết hạn.
+Chuyển quyền chủ phòng: Chỉ chuyển khi chủ phòng xác nhận rời hoặc hết hạn khôi phục 30 giây; giữ nguyên quyền trong thời gian RECONNECTING.
+Tự động nộp bài: Nếu hết thời gian vẽ mà người đang kết nối chưa chọn Gửi, Server tự động lấy bản nháp đã đồng bộ làm bài nộp. Nếu người chơi đã được xác nhận mất kết nối và chưa nộp, bản nháp bị đánh dấu SKIPPED, không được chiếu và không bị phạt riêng vì không ai đoán đúng. Tranh đã được Server xác nhận nộp vẫn hợp lệ dù tác giả mất kết nối sau đó.
 Giới hạn kiểm duyệt nét vẽ: Quy định không viết chữ ghi đáp án là quy tắc fair-play, hệ thống không tự động nhận diện chữ viết tay trên canvas.
 Lưu trữ kết quả: Kết quả và điểm số sau mỗi trận đấu hợp lệ được lưu lại CSDL để tính điểm xếp hạng toàn hệ thống.
+
+3. Mất kết nối, kết nối lại và khôi phục phiên
+
+- Trạng thái kết nối tách biệt trạng thái trận: CONNECTED (đang kết nối), RECONNECTING (được giữ chỗ), LEFT (đã rời phòng).
+- Server xác nhận mất kết nối bằng đóng/lỗi WebSocket hoặc heartbeat. Mặc định gửi ping mỗi 5 giây, phát hiện sau khoảng 12 giây không nhận pong. Thời hạn giữ chỗ là 30 giây tính từ lúc Server xác nhận; Client chỉ hiển thị thời gian ước tính khi chưa có hạn chính xác.
+- Trong 30 giây: giữ danh tính, điểm, vị trí phòng, chủ phòng và tranh đã nộp; không tính người mất kết nối là sẵn sàng để bắt đầu trận mới. Trận và các đồng hồ vẫn chạy.
+- Kết nối lại phải xác thực tài khoản và mã khôi phục do Server cấp. Chỉ một socket có quyền điều khiển tài khoản. Socket cũ và tác vụ hết hạn cũ không được thay đổi phiên đã khôi phục.
+- Server gửi snapshot riêng cho người quay lại: pha hiện tại, hạn kết thúc pha, vòng, điểm, người chơi, trạng thái đoán đúng và bản nháp riêng. Không gửi từ khóa/bản nháp của người khác. Không đặt lại đồng hồ.
+- Nét vẽ được đồng bộ theo mã tranh và phiên bản tăng dần. Tranh có các trạng thái DRAFT, SUBMITTED, SKIPPED, PUBLISHED. Gửi lại bài nộp đã nhận không tạo tranh hoặc cộng điểm trùng.
+- Nếu quay lại sau hạn vẽ, không được nộp tranh trễ; phải chuyển tới pha hiện tại. Nếu trận đã kết thúc trong lúc mất mạng, hiển thị kết quả gần nhất.
+- Hết 30 giây: Server xóa tư cách thành viên phòng/trận, giải phóng vị trí, xử lý điểm rời trận nếu còn đang đấu, chuyển chủ phòng và cập nhật cho mọi người. Tác vụ hết hạn phải kiểm tra đúng phiên và hạn hiện hành.
+- Sau hết hạn: không khôi phục tư cách thành viên cũ. Người chơi được tự vào lại nếu phòng còn tồn tại, ở WAITING và chưa đầy (vẫn phải đáp ứng mật khẩu phòng). Phòng đang chơi từ chối người đã hết hạn; phòng đã giải tán đưa người chơi về sảnh.
+- Nút Rời phòng cần xác nhận; rời trận đang chơi thông báo phạt 20 điểm và xử lý ngay, không tạo thời gian giữ chỗ.
+- Phiên khôi phục/bản nháp được giữ trong bộ nhớ của Server đơn lẻ; không cam kết khôi phục trận sau khi tiến trình Server khởi động lại.
+
+## 4. Luật tính điểm theo thời gian — phiên bản 2
+
+Áp dụng cho các trận mới sau khi cập nhật. Giữ phòng 3–8 người, chọn từ 10 giây, thời gian vẽ theo cài đặt hiện có (mặc định 60 giây). Mỗi tranh có **30.000 ms để đoán**, không rút ngắn/kéo dài theo cài đặt thời gian vẽ. Trận có thể kết thúc lượt đoán sớm khi mọi người còn có quyền/cơ hội đoán đều đã đúng, nhưng công thức luôn dùng T = 30.000 ms.
+
+### 4.1. Điểm người đoán
+
+`Điểm đoán = round(20 + 80 × (T − t) / T)`, với `T = 30000` và `t` là số mili giây từ lúc Server bắt đầu chiếu tranh đến khi Server chấp nhận đáp án đúng đầu tiên của người chơi.
+
+- Chỉ chấp nhận khi `0 ≤ t < 30000`. Đáp án đến đúng hạn cuối hoặc muộn hơn bị từ chối, nhận 0 điểm.
+- Điểm đúng hợp lệ trong khoảng 20–100. Dùng làm tròn gần nhất; phần lẻ đúng 0,5 làm tròn lên. Không làm tròn thời gian về giây trước khi tính.
+- Sai hoặc không có đáp án đúng trước hạn: 0 điểm; đoán sai không bị trừ điểm và vẫn được thử lại.
+- Mỗi người chỉ được cộng điểm một lần cho mỗi mã tranh trong một trận. Gửi trùng đáp án đúng không cộng thêm.
+- Người vẽ không được đoán tranh của mình. Socket cũ, người hết tư cách thành viên hoặc kết nối không hợp lệ không được tính điểm.
+- Server kiểm soát mốc bắt đầu và mốc chấp nhận bằng đồng hồ đơn điệu; bỏ qua thời gian do Client gửi. Thứ hạng/thứ tự không ảnh hưởng điểm; hai người có thể nhận điểm bằng nhau.
+
+| Thời gian đúng | Điểm |
+|---|---:|
+| 0 giây | 100 |
+| 2 giây | 95 |
+| 3 giây | 92 |
+| 5 giây | 87 |
+| 10 giây | 73 |
+| 15 giây | 60 |
+| 20 giây | 47 |
+| 25 giây | 33 |
+| 29 giây | 23 |
+| 29.999 ms | 20 |
+| Sai, không đúng, hoặc t ≥ 30.000 ms | 0 |
+
+Ví dụ: người đầu tiên đúng ở giây 20 nhận 47 điểm; người tiếp theo đúng ở giây 21 nhận 44 điểm. Không tự động cho người đầu tiên 100 điểm.
+
+### 4.2. Ai được tính vào số người đoán đủ điều kiện?
+
+Với từng bức tranh, Server lập danh sách ứng viên là các thành viên còn quyền tham gia khi lượt đoán bắt đầu, trừ tác giả. Người trong danh sách được tính nếu **đã đoán đúng**, hoặc **có tổng thời gian kết nối hợp lệ ít nhất 10.000 ms** trong lượt đoán đó.
+
+- Thời gian kết nối được cộng dồn qua các lần mất/kết nối lại, chỉ trong cửa sổ của lượt đang xét. Ví dụ: kết nối 4 giây, mất mạng, quay lại thêm 6 giây → đủ 10 giây.
+- Ngưỡng được cấu hình bởi `game.scoring.minimum-exposure-ms`, mặc định 10000. Thời gian lượt đoán vẫn là 30000 ms.
+- Người đã đoán đúng luôn được giữ là người thành công, dù mất kết nối hoặc xác nhận rời sau đó. Quy tắc rời trận/loại tư cách thành viên vẫn áp dụng độc lập.
+- Người rời vĩnh viễn trước khi lượt bắt đầu không phải ứng viên. Người không đúng và chưa đủ 10 giây cơ hội không làm giảm điểm người vẽ.
+- Người mất mạng vẫn trong hạn giữ chỗ có thể quay lại và đoán; không kết thúc lượt sớm chỉ vì những người còn online đã đúng.
+
+### 4.3. Điểm người vẽ
+
+`Điểm vẽ = round(70 × k/m + 30 × S/(100 × m))`
+
+Trong đó `m` là số người đoán đủ điều kiện tại lúc chốt lượt (không bao gồm tác giả), `k` là số người đoán đúng và `S` là tổng điểm đoán theo thời gian của các người đúng.
+
+- `m = 0`: 0 điểm, không phạt vì không ai có cơ hội hợp lệ.
+- `m > 0, k = 0`: −20 điểm.
+- `m > 0, k > 0`: tính theo công thức, làm tròn gần nhất, kết quả trong 0–100.
+- Chỉ chốt và cộng điểm vẽ **một lần**, khi lượt đoán kết thúc. Không tính lại khi nhận thông điệp trùng hoặc reconnect.
+
+Ví dụ với bốn người đủ điều kiện:
+
+| Kết quả | Điểm người đúng | Điểm vẽ |
+|---|---|---:|
+| 4/4 đúng | 60, 60, 60, 60 | 88 |
+| 3/4 đúng | 100, 60, 20 | 66 |
+| 2/4 đúng | 60, 60 | 44 |
+| 1/4 đúng | 60 | 22 |
+| 0/4 đúng | Không có | −20 |
+| Không có người đủ điều kiện | Không có | 0 |
+
+### 4.4. Tranh bị bỏ qua, reconnect và tổng điểm
+
+- Tranh đã được Server xác nhận nộp vẫn hợp lệ khi tác giả mất mạng. Bản nháp chưa nộp của người đang mất kết nối lúc hết hạn vẽ là SKIPPED: không đưa vào hàng đợi đoán, không có điểm vẽ và không phạt riêng vì không ai đoán đúng.
+- Reconnect không đặt lại cửa sổ đoán, thời gian đã tích lũy, điểm đã được cộng hoặc trạng thái đã đúng. Quay lại sau hạn không được tính điểm đoán hồi tố hay nộp tranh trễ.
+- Thưởng/phạt rời trận (−20 người rời, +20 mỗi thành viên hợp lệ còn lại, đúng một lần) tách khỏi điểm vẽ và điểm đoán. Không cộng thưởng/phạt lần thứ hai khi tổng kết.
+- Bảng điểm trận và tổng kết hiển thị `điểm đoán + điểm vẽ + thưởng/phạt`. Điểm âm được giữ nguyên và cập nhật đúng vào xếp hạng. Khi hủy trận, vẫn giữ chính sách hiện có: bỏ kết quả thông thường, giữ thưởng/phạt rời trận đã áp dụng.
+
+### 4.5. Lịch sử và dữ liệu
+
+Trận cũ được đánh dấu `scoring_version = 1`, trận mới dùng `scoring_version = 2`. Không xóa lịch sử, không tính lại điểm cũ và không đặt lại điểm xếp hạng. Cột `points_adjustment` lưu riêng thưởng/phạt của kết quả mới, mặc định 0 cho dữ liệu cũ. Việc cộng điểm trùng được ngăn ở Server theo mã tranh, người chơi và vòng đời trận; trạng thái trận đang chạy vẫn chỉ nằm trong bộ nhớ như cơ chế reconnect hiện có.
 
 

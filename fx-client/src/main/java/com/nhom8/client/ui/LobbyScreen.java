@@ -26,11 +26,13 @@ public class LobbyScreen {
     private final ObservableList<FriendEntry> friendList;
     private final ObservableList<PendingRequestEntry> pendingList;
     private final ObservableList<SearchPlayerEntry> searchResults = FXCollections.observableArrayList();
+    private final ObservableList<LeaderboardEntry> leaderboardEntries = FXCollections.observableArrayList();
 
     private ListView<RoomEntry> roomListView;
     private ListView<PlayerEntry> playerListView;
     private ListView<FriendEntry> friendListView;
     private ListView<PendingRequestEntry> pendingListView;
+    private Label leaderboardStatusLabel;
 
     private Label welcomeLabel;
     private Label roomCountLabel;
@@ -74,6 +76,7 @@ public class LobbyScreen {
     public static class PlayerEntry {
         public String username;
         public String displayName;
+        public String avatar;
         public String status;
         public int rankingScore;
         public String roomId;
@@ -111,11 +114,29 @@ public class LobbyScreen {
     public static class SearchPlayerEntry {
         public String username;
         public String displayName;
+        public String avatar;
         public int rankingScore;
+        public int pointsDrawn;
+        public int pointsGuess;
         public boolean online;
         public String friendStatus = "NONE";
         public boolean requestFromMe;
         public String getEffectiveName() { return displayName == null || displayName.isBlank() ? username : displayName; }
+    }
+
+    public static class LeaderboardEntry {
+        public int rank;
+        public String username;
+        public String displayName;
+        public String avatar;
+        public int rankingScore;
+        public int pointsDrawn;
+        public int pointsGuess;
+        public boolean online;
+
+        public String getEffectiveName() {
+            return displayName == null || displayName.isBlank() ? username : displayName;
+        }
     }
 
     public LobbyScreen(MainApplication app) {
@@ -294,7 +315,17 @@ public class LobbyScreen {
         socialCard.getChildren().addAll(tabHeader, socialContentStack);
 
         mainContainer.getChildren().addAll(roomsCard, socialCard);
-        root.setCenter(mainContainer);
+
+        Tab lobbyTab = new Tab("🎨 Sảnh chờ", mainContainer);
+        lobbyTab.setClosable(false);
+        Tab leaderboardTab = new Tab("🏆 Xếp hạng", createLeaderboardView());
+        leaderboardTab.setClosable(false);
+        TabPane mainTabs = new TabPane(lobbyTab, leaderboardTab);
+        mainTabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        mainTabs.getSelectionModel().selectedItemProperty().addListener((observable, oldTab, selectedTab) -> {
+            if (selectedTab == leaderboardTab) requestLeaderboard();
+        });
+        root.setCenter(mainTabs);
 
         StackPane lobbyRoot = new StackPane(root);
         AnchorPane floatingLayer = new AnchorPane();
@@ -367,6 +398,80 @@ public class LobbyScreen {
         scene = new Scene(lobbyRoot, 1100, 640);
         MainApplication.applyTheme(scene);
         return scene;
+    }
+
+    private VBox createLeaderboardView() {
+        VBox content = new VBox(14);
+        content.setPadding(new Insets(24));
+        content.setAlignment(Pos.TOP_CENTER);
+        content.getStyleClass().add("speech-box-white");
+
+        HBox header = new HBox(12);
+        header.setAlignment(Pos.CENTER_LEFT);
+        Label title = new Label("🏆 BẢNG XẾP HẠNG NGƯỜI CHƠI");
+        title.setStyle("-fx-font-family: 'Amatic SC'; -fx-font-size: 32px; -fx-font-weight: bold; -fx-text-fill: -fx-ink;");
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        Button refreshButton = new Button("↻ Cập nhật");
+        refreshButton.getStyleClass().add("pencil-button-sm");
+        refreshButton.setOnAction(event -> requestLeaderboard());
+        header.getChildren().addAll(title, spacer, refreshButton);
+
+        leaderboardStatusLabel = new Label("Đang tải bảng xếp hạng...");
+        leaderboardStatusLabel.setStyle("-fx-font-family: 'Patrick Hand'; -fx-font-size: 15px; -fx-text-fill: #64748B;");
+
+        TableView<LeaderboardEntry> table = new TableView<>(leaderboardEntries);
+        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        table.setPlaceholder(new Label("Chưa có dữ liệu xếp hạng."));
+        VBox.setVgrow(table, Priority.ALWAYS);
+
+        TableColumn<LeaderboardEntry, String> rankColumn = new TableColumn<>("Hạng");
+        rankColumn.setCellValueFactory(cell -> new javafx.beans.property.SimpleStringProperty(
+                cell.getValue().rank <= 3 ? switch (cell.getValue().rank) {
+                    case 1 -> "🥇 1";
+                    case 2 -> "🥈 2";
+                    default -> "🥉 3";
+                } : String.valueOf(cell.getValue().rank)));
+        rankColumn.setMaxWidth(100);
+
+        TableColumn<LeaderboardEntry, String> nameColumn = new TableColumn<>("Người chơi");
+        nameColumn.setCellValueFactory(cell -> new javafx.beans.property.SimpleStringProperty(
+                (cell.getValue().online ? "🟢 " : "⚪ ") + cell.getValue().getEffectiveName()
+                        + "  (@" + (cell.getValue().username == null ? "" : cell.getValue().username) + ")"));
+        nameColumn.setCellFactory(column -> new TableCell<>() {
+            @Override protected void updateItem(String name, boolean empty) {
+                super.updateItem(name, empty);
+                setText(empty ? null : name);
+                LeaderboardEntry entry = getTableRow() == null ? null : getTableRow().getItem();
+                setGraphic(empty || entry == null ? null : AvatarView.create(entry.avatar, 30));
+            }
+        });
+
+        TableColumn<LeaderboardEntry, String> drawnColumn = new TableColumn<>("Điểm vẽ");
+        drawnColumn.setCellValueFactory(cell -> new javafx.beans.property.SimpleStringProperty(
+                String.format("%,d", cell.getValue().pointsDrawn)));
+
+        TableColumn<LeaderboardEntry, String> guessColumn = new TableColumn<>("Điểm đoán");
+        guessColumn.setCellValueFactory(cell -> new javafx.beans.property.SimpleStringProperty(
+                String.format("%,d", cell.getValue().pointsGuess)));
+
+        TableColumn<LeaderboardEntry, String> scoreColumn = new TableColumn<>("Điểm");
+        scoreColumn.setCellValueFactory(cell -> new javafx.beans.property.SimpleStringProperty(
+                String.format("%,d điểm", cell.getValue().rankingScore)));
+        scoreColumn.setMaxWidth(170);
+
+        table.getColumns().addAll(rankColumn, nameColumn, drawnColumn, guessColumn, scoreColumn);
+        content.getChildren().addAll(header, leaderboardStatusLabel, table);
+        return content;
+    }
+
+    private void requestLeaderboard() {
+        if (app.getWsClient() == null || !app.getWsClient().isConnected()) {
+            if (leaderboardStatusLabel != null) leaderboardStatusLabel.setText("Chưa kết nối máy chủ.");
+            return;
+        }
+        if (leaderboardStatusLabel != null) leaderboardStatusLabel.setText("Đang tải bảng xếp hạng...");
+        app.getWsClient().send(new Envelope(MessageType.LEADERBOARD_REQUEST));
     }
 
     private static double clamp(double value, double min, double max) {
@@ -451,9 +556,7 @@ public class LobbyScreen {
                     } else {
                         avatarPane.setStyle("-fx-background-color: #F1F5F9; -fx-background-radius: 19px; -fx-border-color: #CBD5E1; -fx-border-width: 1.5px; -fx-border-radius: 19px;");
                     }
-                    Label avLabel = new Label(item.isOnline ? "🟢" : "👤");
-                    avLabel.setStyle("-fx-font-size: 16px;");
-                    avatarPane.getChildren().add(avLabel);
+                    avatarPane.getChildren().add(AvatarView.create(item.avatar, 34));
 
                     // Name and info
                     VBox infoBox = new VBox(2);
@@ -608,7 +711,7 @@ public class LobbyScreen {
                         }
                     }
 
-                    row.getChildren().addAll(statusDot, infoBox, spacer, actions);
+                    row.getChildren().addAll(AvatarView.create(item.avatar, 34), statusDot, infoBox, spacer, actions);
                     setGraphic(row);
                     setText(null);
 
@@ -683,7 +786,7 @@ public class LobbyScreen {
                     rejectBtn.setStyle("-fx-background-color: #d9d9d9; -fx-text-fill: -fx-ink; -fx-font-family: 'Patrick Hand'; -fx-padding: 2 8; -fx-cursor: hand;");
                     rejectBtn.setOnAction(e -> respondFriendRequest(item.username, false));
 
-                    row.getChildren().addAll(infoBox, spacer, acceptBtn, rejectBtn);
+                    row.getChildren().addAll(AvatarView.create(item.avatar, 34), infoBox, spacer, acceptBtn, rejectBtn);
                     setGraphic(row);
                     setText(null);
                 }
@@ -781,7 +884,7 @@ public class LobbyScreen {
                 super.updateItem(player, empty);
                 if (empty || player == null) { setGraphic(null); return; }
                 HBox row = new HBox(12); row.setAlignment(Pos.CENTER_LEFT); row.setPadding(new Insets(8));
-                Label avatar = new Label(player.online ? "🟢" : "👤");
+                StackPane avatar = AvatarView.create(player.avatar, 36);
                 VBox details = new VBox(2);
                 Label name = new Label(player.getEffectiveName());
                 name.setStyle("-fx-font-size: 16px; -fx-font-weight: bold;");
@@ -904,7 +1007,29 @@ public class LobbyScreen {
                 welcomeLabel.setText("👋 " + app.getCurrentDisplayName());
             }
 
-            if (env.getType() == MessageType.ROOM_LIST) {
+            if (env.getType() == MessageType.LEADERBOARD) {
+                leaderboardEntries.clear();
+                JsonNode rows = env.getData() == null ? null : env.getData().get("leaderboard");
+                if (rows != null && rows.isArray()) {
+                    rows.forEach(node -> {
+                        LeaderboardEntry entry = new LeaderboardEntry();
+                        entry.rank = node.path("rank").asInt(leaderboardEntries.size() + 1);
+                        entry.username = node.path("username").asText("");
+                        entry.displayName = node.path("displayName").asText(entry.username);
+                        entry.avatar = node.path("avatar").asText("1");
+                        entry.rankingScore = node.path("rankingScore").asInt(0);
+                        entry.pointsDrawn = node.path("pointsDrawn").asInt(0);
+                        entry.pointsGuess = node.path("pointsGuess").asInt(0);
+                        entry.online = node.path("online").asBoolean(false);
+                        leaderboardEntries.add(entry);
+                    });
+                }
+                if (leaderboardStatusLabel != null) {
+                    leaderboardStatusLabel.setText(leaderboardEntries.isEmpty()
+                            ? "Chưa có người chơi trong bảng xếp hạng."
+                            : "Top " + leaderboardEntries.size() + " người chơi · 🟢 đang online · ⚪ ngoại tuyến");
+                }
+            } else if (env.getType() == MessageType.ROOM_LIST) {
                 roomList.clear();
                 if (env.getData() != null && env.getData().has("rooms")) {
                     JsonNode roomsNode = env.getData().get("rooms");
@@ -915,7 +1040,7 @@ public class LobbyScreen {
                         entry.host = r.has("host") ? r.get("host").asText() : "";
                         entry.hostDisplayName = r.has("hostDisplayName") ? r.get("hostDisplayName").asText() : entry.host;
                         entry.playerCount = r.has("playerCount") ? r.get("playerCount").asInt() : 1;
-                        entry.maxPlayers = r.has("maxPlayers") ? r.get("maxPlayers").asInt() : 6;
+                        entry.maxPlayers = r.has("maxPlayers") ? r.get("maxPlayers").asInt() : 8;
                         entry.status = r.has("status") ? r.get("status").asText() : "WAITING";
                         entry.hasPassword = r.has("hasPassword") && r.get("hasPassword").asBoolean();
                         roomList.add(entry);
@@ -936,6 +1061,7 @@ public class LobbyScreen {
                         PlayerEntry p = new PlayerEntry();
                         p.username = u.has("username") ? u.get("username").asText() : "";
                         p.displayName = u.has("displayName") ? u.get("displayName").asText() : p.username;
+                        p.avatar = u.path("avatar").asText("1");
                         p.status = u.has("status") ? u.get("status").asText() : "Đang rảnh";
                         p.rankingScore = u.has("rankingScore") ? u.get("rankingScore").asInt() : 0;
                         p.roomId = u.has("roomId") ? u.get("roomId").asText() : null;
@@ -1007,6 +1133,7 @@ public class LobbyScreen {
                     entry.rankingScore = node.path("rankingScore").asInt(0);
                     entry.online = node.path("isOnline").asBoolean(node.path("online").asBoolean(false));
                     entry.friendStatus = node.path("friendStatus").asText("NONE");
+                    entry.avatar = node.path("avatar").asText("1");
                     entry.requestFromMe = node.path("isSender").asBoolean(false);
                     if (!entry.username.isBlank()) searchResults.add(entry);
                 });
