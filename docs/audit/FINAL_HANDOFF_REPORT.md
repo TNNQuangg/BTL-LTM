@@ -1,6 +1,6 @@
 # Bàn giao môi trường phát triển độc lập
 
-Ngày kiểm tra: 23/10/2026. Mã nguồn nằm trên nhánh `feature/independent-local-dev` (commit cấu hình ban đầu `3ec3d25`), tạo từ `main` đã được đẩy trước đó. Không sao chép hoặc thay đổi database đang dùng của chủ dự án. Môi trường thử nghiệm là checkout riêng ở `target/independent-clone-check`, cổng 8092 và file H2 riêng trong `server/data` của checkout đó.
+Ngày kiểm tra: 23/10/2026. Mã nguồn nằm trên nhánh `feature/independent-local-dev` (commit cấu hình `3ec3d25`, commit báo cáo/test `21b5d8b`), tạo từ `main` đã được đẩy trước đó. Không sao chép hoặc thay đổi database đang dùng của chủ dự án. Môi trường thử nghiệm là checkout riêng ở `target/independent-clone-check`, cổng 8092 và file H2 riêng trong `server/data` của checkout đó.
 
 | Câu hỏi | Kết luận và bằng chứng |
 |---|---|
@@ -15,7 +15,7 @@ Ngày kiểm tra: 23/10/2026. Mã nguồn nằm trên nhánh `feature/independen
 | 9. DB runtime bị Git loại? | **Có.** `.gitignore` loại `/server/data/`, `/data/`, `*.mv.db`, `*.trace.db`, log và `target/`; checkout sạch không chứa DB. |
 | 10. Người khác theo README chạy được? | **Đã kiểm chứng trên checkout sạch Windows.** Script README tạo H2 và mở server 8092; client WebSocket đăng ký/đăng nhập/tạo phòng. JavaFX QA PASS. Cần JDK21+, Maven và Git; thử nghiệm trên máy mới hoàn toàn không dùng cache Maven chưa thực hiện. |
 | 11. Còn gì chưa xác minh? | **MySQL thực, GUI thao tác thủ công đầy đủ, nhiều máy vật lý, CI GitHub của nhánh mới và tính 3NF toàn cục.** Script `start-local-server.ps1` chỉ được thử trên Windows PowerShell. |
-| 12. Nhánh đã xuất bản? | **Chưa tại thời điểm lập báo cáo này.** Sau khi commit báo cáo, cần push nhánh và tạo PR theo workflow nhóm; chỉ ghi PASS nếu remote xác nhận. |
+| 12. Nhánh đã xuất bản? | **Có.** GitHub đã nhận `feature/independent-local-dev` ở commit `21b5d8b` và đặt upstream `origin/feature/independent-local-dev`. Chưa tạo PR/merge vào `main`; liên kết tạo PR: `https://github.com/vuhuy2901/BTL-LTM/pull/new/feature/independent-local-dev`. |
 
 ## Kiểm tra chi tiết
 
