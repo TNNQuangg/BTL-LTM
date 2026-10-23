@@ -9,11 +9,11 @@
 
 1. Giải nén gói demo. Chạy `start-server.cmd` trên máy chủ và giữ cửa sổ đó mở.
 2. Mở PowerShell **Run as administrator** tại thư mục giải nén, chạy `powershell -ExecutionPolicy Bypass -File .\allow-lan-firewall.ps1` một lần. Quy tắc chỉ mở TCP 8080 cho các máy trong mạng nội bộ, kể cả khi Windows đặt Wi-Fi là Public.
-3. Xem IP Wi-Fi của máy chủ: `ipconfig` hoặc `Get-NetIPAddress -AddressFamily IPv4`. Chọn IP của Wi-Fi/Ethernet, không dùng `127.0.0.1`, `172.31.*` của máy ảo, hay IP VPN. IP của máy khi chuẩn bị gói lần này là `192.168.1.180`; IP này có thể đổi.
-4. Người chơi cùng Wi-Fi giải nén gói demo và chạy `start-client.cmd 192.168.1.180:8080` (thay bằng IP hiện tại của máy chủ). Có thể nhập IP ngay trên màn đăng nhập.
-5. Kiểm tra từ máy người chơi: `Test-NetConnection 192.168.1.180 -Port 8080`. `TcpTestSucceeded : True` nghĩa là đã tới server. Nếu sai, kiểm tra cùng mạng, firewall, IP và cửa sổ server.
+3. Xem IP Wi-Fi của máy chủ: `ipconfig` hoặc `Get-NetIPAddress -AddressFamily IPv4`. Chọn IP của Wi-Fi/Ethernet, không dùng `127.0.0.1` hay IP máy ảo/VPN nếu đang chơi cùng Wi-Fi. Gói demo chủ động đặt `SERVER_ADDRESS=0.0.0.0` để các máy LAN có thể vào; bản phát triển local chỉ nghe trên máy mình theo mặc định.
+4. Người chơi cùng Wi-Fi giải nén gói demo và chạy `start-client.cmd <IP-máy-chủ>:8080` (thay bằng IP hiện tại của máy chủ). Có thể nhập IP ngay trên màn đăng nhập.
+5. Kiểm tra từ máy người chơi: `Test-NetConnection <IP-máy-chủ> -Port 8080`. `TcpTestSucceeded : True` nghĩa là đã tới server. Nếu sai, kiểm tra cùng mạng, firewall, IP và cửa sổ server.
 
-Máy chủ cũng có thể chạy `start-client.cmd localhost:8080` để tham gia chơi. Mỗi người đăng nhập một tài khoản khác nhau. Các tài khoản demo: `player1`, `player2`, `player3`, `admin`; mật khẩu ban đầu `123456`.
+Máy chủ cũng có thể chạy `start-client.cmd localhost:8080` để tham gia chơi. Mỗi người đăng ký và đăng nhập một tài khoản khác nhau; database mới không tạo sẵn tài khoản demo.
 
 ## Người chơi ở mạng khác
 

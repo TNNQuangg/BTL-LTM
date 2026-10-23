@@ -355,7 +355,7 @@ public class MainApplication extends Application {
             if (host.contains(":") && !host.startsWith("[")) host = "[" + host + "]";
             return uri.getScheme() + "://" + host + ":" + port + path;
         } catch (IllegalArgumentException ex) {
-            throw new IllegalArgumentException("Địa chỉ máy chủ không hợp lệ. Ví dụ: 192.168.1.180:8080");
+            throw new IllegalArgumentException("Địa chỉ máy chủ không hợp lệ. Ví dụ: localhost:8080");
         }
     }
 
@@ -384,7 +384,7 @@ public class MainApplication extends Application {
                     if (loginBtn != null) loginBtn.setDisable(false);
                     if (registerBtn != null) registerBtn.setDisable(false);
                     statusLabel.setStyle("-fx-text-fill: #D8000C; -fx-font-weight: bold;");
-                    statusLabel.setText("Không thể kết nối máy chủ (" + serverUrl + ")!");
+                    statusLabel.setText("Không kết nối được " + serverUrl + ". Hãy bật Backend trên máy này hoặc kiểm tra địa chỉ Server.");
                 });
             }
         });
@@ -465,7 +465,7 @@ public class MainApplication extends Application {
                 Platform.runLater(() -> {
                     if (registerBtn != null) registerBtn.setDisable(false);
                     statusLabel.setStyle("-fx-text-fill: #D8000C; -fx-font-weight: bold;");
-                    statusLabel.setText("Không thể kết nối máy chủ (" + serverUrl + ")!");
+                    statusLabel.setText("Không kết nối được " + serverUrl + ". Hãy bật Backend trên máy này hoặc kiểm tra địa chỉ Server.");
                 });
             }
         });

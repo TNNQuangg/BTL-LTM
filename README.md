@@ -51,6 +51,36 @@ An toàn: tài khoản demo chỉ bật theo tùy chọn, mật khẩu thực t�
 
 Đóng góp: tạo nhánh riêng, chạy test, xem `git diff --check`, gửi PR; cập nhật `game_rules_nhom8.md` mỗi khi sửa luật. Các kết quả audit chi tiết ở [docs/audit/FULL_PROJECT_REPORT.md](docs/audit/FULL_PROJECT_REPORT.md) và [docs/database/DATABASE_AUDIT.md](docs/database/DATABASE_AUDIT.md).
 
+## Phát triển độc lập trên máy cá nhân
+
+Mỗi thành viên clone mã nguồn và chạy một Backend, một JavaFX Client, một database riêng **trên chính máy mình**. Không sao chép `*.mv.db`, tài khoản hoặc kết quả trận qua Git. Mặc định Backend chỉ nghe `127.0.0.1:8080`; Client đi tới `ws://localhost:8080/ws/game`. Để demo qua LAN, người chủ động đặt `SERVER_ADDRESS=0.0.0.0` và nhập IP máy chủ vào Client.
+
+Trên Windows/VS Code, cài JDK 21 trở lên, Maven 3.9 trở lên và Git. Không cần Node.js, Docker hay MySQL nếu dùng H2. Trong PowerShell:
+
+```powershell
+java -version
+mvn.cmd -version
+git clone https://github.com/vuhuy2901/BTL-LTM.git
+Set-Location BTL-LTM
+powershell -ExecutionPolicy Bypass -File .\scripts\start-local-server.ps1
+```
+
+Script build ba module, tạo `server/data/` riêng của clone, đặt `DB_URL` đến H2 ở đó rồi bật Backend. Hãy giữ terminal này mở. H2 tự tạo 8 bảng bằng JPA/Hibernate `ddl-auto=update`; server nạp từ khóa mặc định từ mã nguồn, không cần nhập SQL hay tải DB của ai. Không tạo tài khoản admin/demo mặc định. Database và tài khoản của bạn còn nguyên khi dừng/chạy lại Backend. `.env.example` là tài liệu tham khảo biến môi trường, không được tự nạp; nếu muốn đổi cổng hoặc DB, đặt `$env:SERVER_PORT='8081'` hoặc `$env:DB_URL='jdbc:h2:file:C:/duong-dan-rieng/game_db'` **trước** khi chạy script. Mỗi Backend chỉ mở một file H2 tại một thời điểm.
+
+Mở terminal PowerShell thứ hai ở thư mục clone:
+
+```powershell
+mvn.cmd -pl fx-client javafx:run
+```
+
+Chọn địa chỉ mặc định `localhost:8080`, đăng ký tài khoản local, rồi đăng nhập. Nếu dùng cổng khác, sửa ô địa chỉ Server trong Client. Có thể kiểm tra Backend bằng `Test-NetConnection 127.0.0.1 -Port 8080`; WebSocket ở `/ws/game`. Mở 3 Client, tạo/cho vào cùng phòng, cả 3 sẵn sàng rồi bắt đầu game. Luật là 3–8 người, chọn từ 10 giây, vẽ mặc định 60 giây và đoán 30 giây.
+
+MySQL là tùy chọn: tự tạo MySQL ở máy mình, đặt `$env:DB_URL`, `$env:DB_USER`, `$env:DB_PASSWORD`, rồi chạy `mvn.cmd -B -DskipTests install` và `mvn.cmd -pl server -Dspring-boot.run.profiles=mysql spring-boot:run`. Chỉ dùng profile `mysql` khi database MySQL đã sẵn sàng. Profile `h2` cũng nhận `DB_URL`/`DB_USER`/`DB_PASSWORD`; không dùng `ddl-auto=create` trên DB cần giữ. Chưa kiểm tra MySQL thực tế trong lượt bàn giao này.
+
+Sau `git pull origin main`, đọc [quy trình migration](docs/database/LOCAL_MIGRATIONS.md), sao lưu DB của riêng mình và chạy `mvn.cmd -B verify`. Thay đổi source theo nhánh `git switch -c feature/ten-tinh-nang`, commit và push nhánh đó, tạo Pull Request; sau review/merge, thành viên khác pull `main`. Git chỉ đồng bộ source/config/test, không đồng bộ dữ liệu local. Không force-push.
+
+Nếu cổng 8080 bị chiếm, chỉ để một Backend chạy hoặc đổi `SERVER_PORT` và ô địa chỉ Client. Nếu H2 báo khóa file, kiểm tra không có hai Server dùng cùng `DB_URL`. Nếu Maven báo thiếu `common`, chạy `mvn.cmd -B -DskipTests install` ở root. Nếu Client báo không kết nối được, bật Backend trước và kiểm tra `Test-NetConnection`. Nếu gõ đuôi `.ps14`, sửa thành `.ps1`. File `.env` và database được `.gitignore` loại khỏi Git.
+
 ## Ảnh đại diện
 
 Trong **Trang cá nhân**, chọn **Tải ảnh từ máy…** (PNG/JPG, tối đa 10 MB).

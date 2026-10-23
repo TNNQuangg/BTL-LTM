@@ -21,11 +21,13 @@ public class LiveServerTest {
         AtomicBoolean loginSuccess = new AtomicBoolean(false);
         AtomicBoolean roomSuccess = new AtomicBoolean(false);
 
-        String testUsername = "user_" + (System.currentTimeMillis() % 100000);
+        String endpoint = args.length > 0 ? args[0] : "ws://localhost:8080/ws/game";
+        boolean loginExisting = args.length > 2 && "--login-existing".equals(args[1]);
+        String testUsername = loginExisting ? args[2] : "user_" + java.util.UUID.randomUUID().toString().substring(0, 8);
         String testPassword = "mypassword123";
-        String testDisplayName = "Họa Sĩ Nhí " + (System.currentTimeMillis() % 1000);
+        String testDisplayName = "Hoa Si " + testUsername;
 
-        GameWebSocketClient client = new GameWebSocketClient("ws://localhost:8080/ws/game", env -> {
+        GameWebSocketClient client = new GameWebSocketClient(endpoint, env -> {
             System.out.println("[TEST NHẬN] " + env.getType() + " | success=" + env.isSuccess() + " | content=" + env.getContent());
 
             if (env.getType() == MessageType.REGISTER || env.getType() == MessageType.REGISTER_RESPONSE) {
@@ -38,30 +40,32 @@ public class LiveServerTest {
                     loginSuccess.set(true);
                 }
                 loginLatch.countDown();
-            } else if (env.getType() == MessageType.ROOM_UPDATE || env.getType() == MessageType.ROOM_CREATE) {
-                roomSuccess.set(true);
+            } else if (env.getType() == MessageType.ROOM_RESPONSE) {
+                roomSuccess.set(env.isSuccess());
                 roomLatch.countDown();
             }
         });
 
         // 1. Kết nối
-        System.out.println("1. Đang kết nối tới ws://localhost:8080/ws/game...");
+        System.out.println("1. Đang kết nối tới " + endpoint + "...");
         client.connect().get(5, TimeUnit.SECONDS);
 
         // 2. Test Đăng ký
-        System.out.println("2. Gửi gói tin ĐĂNG KÝ: username=" + testUsername + ", displayName=" + testDisplayName);
-        Envelope regEnv = new Envelope(MessageType.REGISTER);
-        regEnv.put("username", testUsername);
-        regEnv.put("password", testPassword);
-        regEnv.put("displayName", testDisplayName);
-        client.send(regEnv);
+        if (!loginExisting) {
+            System.out.println("2. Gửi gói tin ĐĂNG KÝ: username=" + testUsername + ", displayName=" + testDisplayName);
+            Envelope regEnv = new Envelope(MessageType.REGISTER);
+            regEnv.put("username", testUsername);
+            regEnv.put("password", testPassword);
+            regEnv.put("displayName", testDisplayName);
+            client.send(regEnv);
 
-        boolean regWait = registerLatch.await(5, TimeUnit.SECONDS);
-        if (!regWait || !registerSuccess.get()) {
-            System.err.println("❌ TEST ĐĂNG KÝ THẤT BẠI!");
-            System.exit(1);
+            boolean regWait = registerLatch.await(5, TimeUnit.SECONDS);
+            if (!regWait || !registerSuccess.get()) {
+                System.err.println("❌ TEST ĐĂNG KÝ THẤT BẠI!");
+                System.exit(1);
+            }
+            System.out.println("✔ ĐĂNG KÝ THÀNH CÔNG!");
         }
-        System.out.println("✔ ĐĂNG KÝ THÀNH CÔNG!");
 
         // 3. Test Đăng nhập
         System.out.println("3. Gửi gói tin ĐĂNG NHẬP: username=" + testUsername);
