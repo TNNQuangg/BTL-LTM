@@ -53,7 +53,7 @@ An toàn: tài khoản demo chỉ bật theo tùy chọn, mật khẩu thực t�
 
 ## Phát triển độc lập trên máy cá nhân
 
-Mỗi thành viên clone mã nguồn và chạy một Backend, một JavaFX Client, một database riêng **trên chính máy mình**. Không sao chép `*.mv.db`, tài khoản hoặc kết quả trận qua Git. Mặc định Backend chỉ nghe `127.0.0.1:8080`; Client đi tới `ws://localhost:8080/ws/game`. Để demo qua LAN, người chủ động đặt `SERVER_ADDRESS=0.0.0.0` và nhập IP máy chủ vào Client.
+Mỗi thành viên clone mã nguồn và chạy một Backend, một JavaFX Client, một database riêng **trên chính máy mình**. Không sao chép `*.mv.db`, tài khoản hoặc kết quả trận qua Git. Mặc định Backend chỉ chạy local trên máy mình tại `127.0.0.1:8080`; Client kết nối bằng `ws://localhost:8080/ws/game`. Để demo qua LAN, người chủ động đặt `SERVER_ADDRESS=0.0.0.0` và nhập IP máy chủ vào Client.
 
 Trên Windows/VS Code, cài JDK 21 trở lên, Maven 3.9 trở lên và Git. Không cần Node.js, Docker hay MySQL nếu dùng H2. Trong PowerShell:
 
@@ -73,7 +73,7 @@ Mở terminal PowerShell thứ hai ở thư mục clone:
 mvn.cmd -pl fx-client javafx:run
 ```
 
-Chọn địa chỉ mặc định `localhost:8080`, đăng ký tài khoản local, rồi đăng nhập. Nếu dùng cổng khác, sửa ô địa chỉ Server trong Client. Có thể kiểm tra Backend bằng `Test-NetConnection 127.0.0.1 -Port 8080`; WebSocket ở `/ws/game`. Mở 3 Client, tạo/cho vào cùng phòng, cả 3 sẵn sàng rồi bắt đầu game. Luật là 3–8 người, chọn từ 10 giây, vẽ mặc định 60 giây và đoán 30 giây.
+Chọn địa chỉ mặc định `localhost:8080`, đăng ký tài khoản local, rồi đăng nhập. Nếu dùng cổng khác, sửa ô địa chỉ Server trong Client. Có thể kiểm tra Backend bằng `Test-NetConnection localhost -Port 8080`; WebSocket ở `/ws/game`. Mở 3 Client, tạo/cho vào cùng phòng, cả 3 sẵn sàng rồi bắt đầu game. Luật là 3–8 người, chọn từ 10 giây, vẽ mặc định 60 giây và đoán 30 giây.
 
 MySQL là tùy chọn: tự tạo MySQL ở máy mình, đặt `$env:DB_URL`, `$env:DB_USER`, `$env:DB_PASSWORD`, rồi chạy `mvn.cmd -B -DskipTests install` và `mvn.cmd -pl server -Dspring-boot.run.profiles=mysql spring-boot:run`. Chỉ dùng profile `mysql` khi database MySQL đã sẵn sàng. Profile `h2` cũng nhận `DB_URL`/`DB_USER`/`DB_PASSWORD`; không dùng `ddl-auto=create` trên DB cần giữ. Chưa kiểm tra MySQL thực tế trong lượt bàn giao này.
 
