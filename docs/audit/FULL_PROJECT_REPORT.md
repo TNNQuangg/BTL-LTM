@@ -32,7 +32,9 @@ H2 bản sao thực tế có 8 bảng: `users`, `friendships`, `chat_messages`, 
 
 ## 7. Git và khả năng triển khai
 
-Nhánh lúc bắt đầu audit: `review/pr-3-without-chat-limit`; remote `origin` trỏ `https://github.com/vuhuy2901/BTL-LTM.git`. Đã tạo nhánh riêng `audit/clone-ready-2026-10-23` và commit `30a6435`. Dữ liệu DB, log và `node_modules` không nằm trong commit. Script reset mọi mật khẩu bằng một hash cố định đã xóa khỏi HEAD mới; file vẫn có thể lấy lại từ Git history và mật khẩu từng bị chia sẻ cần thay. `.gitignore` đã bổ sung DB/log/node_modules/.env, giữ `.env.example`. `.github/workflows/ci.yml` chạy `mvn -B verify` trên JDK21, chưa có kết quả CI từ GitHub. Docker Compose không được thêm vì JavaFX là desktop và H2 nhúng; setup Maven là cách hỗ trợ. Nhánh audit chưa được xác nhận có trên default branch.
+Nhánh lúc bắt đầu audit: `review/pr-3-without-chat-limit`; remote `origin` trỏ `https://github.com/vuhuy2901/BTL-LTM.git`. Đã tạo nhánh riêng `audit/clone-ready-2026-10-23` với commit mã nguồn `30a6435` và commit báo cáo clean checkout `f1d4fb5`. Dữ liệu DB, log và `node_modules` không nằm trong commit. Script reset mọi mật khẩu bằng một hash cố định đã xóa khỏi HEAD mới; file vẫn có thể lấy lại từ Git history và mật khẩu từng bị chia sẻ cần thay. `.gitignore` đã bổ sung DB/log/node_modules/.env, giữ `.env.example`. `.github/workflows/ci.yml` chạy `mvn -B verify` trên JDK21, chưa có kết quả CI từ GitHub. Docker Compose không được thêm vì JavaFX là desktop và H2 nhúng; setup Maven là cách hỗ trợ.
+
+**Push bị chặn bởi hệ thống duyệt tự động:** lệnh đẩy toàn bộ payload lên remote chưa có xác nhận đủ tin cậy cho chính đích/payload này. Không thử lệnh thay thế để vượt chặn. Do đó nhánh audit chỉ ở local, chưa có PR/merge và người dùng `git pull` từ `main` chưa nhận thay đổi. Cần người dùng chấp thuận rõ việc gửi nhánh này tới remote đã nêu; sau đó chạy `git push -u origin audit/clone-ready-2026-10-23`, tạo PR và xác minh CI/merge.
 
 ## 8. Kết quả kiểm thử
 
@@ -40,7 +42,8 @@ Nhánh lúc bắt đầu audit: `review/pr-3-without-chat-limit`; remote `origin
 - Đọc schema H2 2.2.224 từ bản sao offline: **PASS**, 8 bảng/38 cột trước hai cột migration; 0 cặp match/user trùng trong bản sao. DB live/MySQL: **NOT VERIFIED** trực tiếp.
 - Checkout sạch `target/clean-clone-check` từ commit `30a6435`: `mvn.cmd -B verify` **PASS**, 63 test và cả ba module build thành công; log `target/clean-clone-check/clean-check.log`. Đây là checkout riêng nhưng dùng Maven cache của máy, chưa phải máy mới hoàn toàn.
 - Từ checkout sạch, khởi động JAR server cổng 8091 với DB H2 disposable riêng: **PASS**, WebSocket bắt tay HTTP 101; sau khi dừng server, DB có 8 bảng và 0 tài khoản, chứng minh không cần DB cũ và seed mặc định tắt. Đã dừng đúng tiến trình server thử nghiệm. Trận multiplayer/reconnect qua WebSocket được `GameIntegrationTest` và `SessionRecoveryTest` kiểm tra trong bộ `verify`; chưa chơi thủ công 3 client trên checkout sạch.
-- GitHub CI/push và kiểm tra clone lại từ remote: **NOT VERIFIED** cho tới khi remote nhận nhánh và Actions chạy; không suy diễn từ test trong workspace.
+- `mvn.cmd -B -DskipTests package` ở workspace gốc: **PASS**. Đã xác nhận cổng 8080 không có client, dừng đúng JAR cũ, sao lưu DB đã đóng tại `server/target/game_db.before-audit-restart.mv.db` (cùng kích cỡ bản gốc), rồi bật JAR mới. Server báo `ACCEPTING_TRAFFIC`, WebSocket trả HTTP 101 tại cổng 8080. DB cũ không bị xóa hoặc reset; tài khoản demo cũ vẫn cần đổi mật khẩu.
+- GitHub push: **BLOCKED bởi auto-review**, không phải lỗi mạng hay xác thực. CI/clone từ remote: **NOT RUN** vì nhánh chưa được đẩy.
 
 ## 9. Rủi ro
 
