@@ -34,7 +34,7 @@ H2 bản sao thực tế có 8 bảng: `users`, `friendships`, `chat_messages`, 
 
 Nhánh lúc bắt đầu audit: `review/pr-3-without-chat-limit`; remote `origin` trỏ `https://github.com/vuhuy2901/BTL-LTM.git`. Đã tạo nhánh riêng `audit/clone-ready-2026-10-23` với commit mã nguồn `30a6435` và commit báo cáo clean checkout `f1d4fb5`. Dữ liệu DB, log và `node_modules` không nằm trong commit. Script reset mọi mật khẩu bằng một hash cố định đã xóa khỏi HEAD mới; file vẫn có thể lấy lại từ Git history và mật khẩu từng bị chia sẻ cần thay. `.gitignore` đã bổ sung DB/log/node_modules/.env, giữ `.env.example`. `.github/workflows/ci.yml` chạy `mvn -B verify` trên JDK21, chưa có kết quả CI từ GitHub. Docker Compose không được thêm vì JavaFX là desktop và H2 nhúng; setup Maven là cách hỗ trợ.
 
-**Push bị chặn bởi hệ thống duyệt tự động:** lệnh đẩy toàn bộ payload lên remote chưa có xác nhận đủ tin cậy cho chính đích/payload này. Không thử lệnh thay thế để vượt chặn. Do đó nhánh audit chỉ ở local, chưa có PR/merge và người dùng `git pull` từ `main` chưa nhận thay đổi. Cần người dùng chấp thuận rõ việc gửi nhánh này tới remote đã nêu; sau đó chạy `git push -u origin audit/clone-ready-2026-10-23`, tạo PR và xác minh CI/merge.
+Sau khi chủ dự án trực tiếp yêu cầu đẩy lên `main`, đã fetch và xác nhận `origin/main` là tổ tiên của commit audit. Lệnh push thường (fast-forward, không force) được GitHub chấp nhận: `main` từ `5e3546a` lên `2c5670e`. Clone mới từ remote `main` nhận đúng `2c5670e`; mã đã có cho người dùng `git pull`. Không tạo PR vì chủ dự án yêu cầu đẩy thẳng lên `main`. GitHub Actions đã cấu hình nhưng chưa đọc kết quả chạy trên GitHub.
 
 ## 8. Kết quả kiểm thử
 
@@ -43,7 +43,8 @@ Nhánh lúc bắt đầu audit: `review/pr-3-without-chat-limit`; remote `origin
 - Checkout sạch `target/clean-clone-check` từ commit `30a6435`: `mvn.cmd -B verify` **PASS**, 63 test và cả ba module build thành công; log `target/clean-clone-check/clean-check.log`. Đây là checkout riêng nhưng dùng Maven cache của máy, chưa phải máy mới hoàn toàn.
 - Từ checkout sạch, khởi động JAR server cổng 8091 với DB H2 disposable riêng: **PASS**, WebSocket bắt tay HTTP 101; sau khi dừng server, DB có 8 bảng và 0 tài khoản, chứng minh không cần DB cũ và seed mặc định tắt. Đã dừng đúng tiến trình server thử nghiệm. Trận multiplayer/reconnect qua WebSocket được `GameIntegrationTest` và `SessionRecoveryTest` kiểm tra trong bộ `verify`; chưa chơi thủ công 3 client trên checkout sạch.
 - `mvn.cmd -B -DskipTests package` ở workspace gốc: **PASS**. Đã xác nhận cổng 8080 không có client, dừng đúng JAR cũ, sao lưu DB đã đóng tại `server/target/game_db.before-audit-restart.mv.db` (cùng kích cỡ bản gốc), rồi bật JAR mới. Server báo `ACCEPTING_TRAFFIC`, WebSocket trả HTTP 101 tại cổng 8080. DB cũ không bị xóa hoặc reset; tài khoản demo cũ vẫn cần đổi mật khẩu.
-- GitHub push: **BLOCKED bởi auto-review**, không phải lỗi mạng hay xác thực. CI/clone từ remote: **NOT RUN** vì nhánh chưa được đẩy.
+- GitHub push fast-forward lên `main`: **PASS**, remote xác nhận `5e3546a..2c5670e`.
+- Clone mới từ GitHub `main` vào `target/remote-main-check`: **PASS**, commit `2c5670e`. `mvn.cmd -B verify` trong clone: **PASS**, 63 test, 0 fail/error/skip và tất cả module build thành công. Log `target/remote-main-check/remote-main-verify.log`. GitHub Actions trên runner của GitHub: **NOT VERIFIED**.
 
 ## 9. Rủi ro
 
@@ -54,7 +55,7 @@ Nhánh lúc bắt đầu audit: `review/pr-3-without-chat-limit`; remote `origin
 | P1 | profile H2 cũ tạo lại schema | đã chuyển `update`; vẫn phải backup và thêm migration versioned trước production |
 | P1 | thiếu unique match/user | có thể có kết quả trùng; đối soát DB hiện hành trước ràng buộc |
 | P2 | không lưu trận/reconnect qua restart | thiết kế lưu trạng thái nếu cần HA |
-| P2 | cần CI và clone từ remote xác minh | checkout sạch cục bộ đã PASS; tiếp theo chạy Actions và clone remote sau push |
+| P2 | cần CI trên GitHub xác minh | checkout sạch và clone lại từ remote đều PASS; kiểm tra kết quả Actions khi runner hoàn tất |
 | P3 | query/index và kích cỡ `GameSession` | đo tải và chia nhỏ theo luồng nghiệp vụ |
 
 ## 10. Lộ trình
