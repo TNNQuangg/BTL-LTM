@@ -15,7 +15,7 @@ Ngày kiểm tra: 23/10/2026. Mã nguồn nằm trên nhánh `feature/independen
 | 9. DB runtime bị Git loại? | **Có.** `.gitignore` loại `/server/data/`, `/data/`, `*.mv.db`, `*.trace.db`, log và `target/`; checkout sạch không chứa DB. |
 | 10. Người khác theo README chạy được? | **Đã kiểm chứng trên checkout sạch Windows.** Script README tạo H2 và mở server 8092; client WebSocket đăng ký/đăng nhập/tạo phòng. JavaFX QA PASS. Cần JDK21+, Maven và Git; thử nghiệm trên máy mới hoàn toàn không dùng cache Maven chưa thực hiện. |
 | 11. Còn gì chưa xác minh? | **MySQL thực, GUI thao tác thủ công đầy đủ, nhiều máy vật lý, CI GitHub của nhánh mới và tính 3NF toàn cục.** Script `start-local-server.ps1` chỉ được thử trên Windows PowerShell. |
-| 12. Nhánh đã xuất bản? | **Có.** GitHub đã nhận `feature/independent-local-dev` ở commit `21b5d8b` và đặt upstream `origin/feature/independent-local-dev`. Chưa tạo PR/merge vào `main`; liên kết tạo PR: `https://github.com/vuhuy2901/BTL-LTM/pull/new/feature/independent-local-dev`. |
+| 12. Nhánh đã xuất bản? | **Có, đã vào `main`.** GitHub đã merge PR #5 từ `feature/independent-local-dev` bằng commit `f5a2e2a` (cha gồm commit tính năng `fbc3fa9`). Đã fetch, xác nhận commit tính năng là tổ tiên của `origin/main` và cây mã nguồn hai nhánh giống nhau. |
 
 ## Kiểm tra chi tiết
 
