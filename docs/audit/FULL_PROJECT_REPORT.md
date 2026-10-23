@@ -32,13 +32,15 @@ H2 bản sao thực tế có 8 bảng: `users`, `friendships`, `chat_messages`, 
 
 ## 7. Git và khả năng triển khai
 
-Nhánh lúc bắt đầu audit: `review/pr-3-without-chat-limit`; remote `origin` trỏ `https://github.com/vuhuy2901/BTL-LTM.git`. Working tree có khoảng 47 đường dẫn thay đổi/chưa track từ các lượt trước, nên cần rà staging rất kỹ, không xóa thay đổi của người dùng. `.gitignore` đã bổ sung DB/log/node_modules/.env, giữ `.env.example`. README ghi đường chạy Maven. `.github/workflows/ci.yml` chạy `mvn -B verify` trên JDK21, chưa có kết quả CI từ GitHub. Docker Compose không được thêm vì JavaFX là desktop và H2 nhúng; setup Maven là cách hỗ trợ. Trạng thái commit/push/clean checkout được cập nhật ở cuối báo cáo khi thực hiện; nếu chưa có bằng chứng remote nhận push thì trạng thái là **NOT VERIFIED**.
+Nhánh lúc bắt đầu audit: `review/pr-3-without-chat-limit`; remote `origin` trỏ `https://github.com/vuhuy2901/BTL-LTM.git`. Đã tạo nhánh riêng `audit/clone-ready-2026-10-23` và commit `30a6435`. Dữ liệu DB, log và `node_modules` không nằm trong commit. Script reset mọi mật khẩu bằng một hash cố định đã xóa khỏi HEAD mới; file vẫn có thể lấy lại từ Git history và mật khẩu từng bị chia sẻ cần thay. `.gitignore` đã bổ sung DB/log/node_modules/.env, giữ `.env.example`. `.github/workflows/ci.yml` chạy `mvn -B verify` trên JDK21, chưa có kết quả CI từ GitHub. Docker Compose không được thêm vì JavaFX là desktop và H2 nhúng; setup Maven là cách hỗ trợ. Nhánh audit chưa được xác nhận có trên default branch.
 
 ## 8. Kết quả kiểm thử
 
 - `mvn.cmd -B test` (giảm logging Spring/Hibernate): **PASS**, 63 test server, 0 fail/error/skip gồm `UserRoleTest`; log `target/full-audit-final-tests.log`.
 - Đọc schema H2 2.2.224 từ bản sao offline: **PASS**, 8 bảng/38 cột trước hai cột migration; 0 cặp match/user trùng trong bản sao. DB live/MySQL: **NOT VERIFIED** trực tiếp.
-- Clean checkout với DB cô lập, smoke game thực tế, GitHub CI/push: **NOT RUN/NOT VERIFIED** cho tới khi kiểm tra hoàn tất; không suy diễn từ test trong workspace.
+- Checkout sạch `target/clean-clone-check` từ commit `30a6435`: `mvn.cmd -B verify` **PASS**, 63 test và cả ba module build thành công; log `target/clean-clone-check/clean-check.log`. Đây là checkout riêng nhưng dùng Maven cache của máy, chưa phải máy mới hoàn toàn.
+- Từ checkout sạch, khởi động JAR server cổng 8091 với DB H2 disposable riêng: **PASS**, WebSocket bắt tay HTTP 101; sau khi dừng server, DB có 8 bảng và 0 tài khoản, chứng minh không cần DB cũ và seed mặc định tắt. Đã dừng đúng tiến trình server thử nghiệm. Trận multiplayer/reconnect qua WebSocket được `GameIntegrationTest` và `SessionRecoveryTest` kiểm tra trong bộ `verify`; chưa chơi thủ công 3 client trên checkout sạch.
+- GitHub CI/push và kiểm tra clone lại từ remote: **NOT VERIFIED** cho tới khi remote nhận nhánh và Actions chạy; không suy diễn từ test trong workspace.
 
 ## 9. Rủi ro
 
@@ -49,7 +51,7 @@ Nhánh lúc bắt đầu audit: `review/pr-3-without-chat-limit`; remote `origin
 | P1 | profile H2 cũ tạo lại schema | đã chuyển `update`; vẫn phải backup và thêm migration versioned trước production |
 | P1 | thiếu unique match/user | có thể có kết quả trùng; đối soát DB hiện hành trước ràng buộc |
 | P2 | không lưu trận/reconnect qua restart | thiết kế lưu trạng thái nếu cần HA |
-| P2 | cần clean clone và CI remote xác minh | chạy trên bản commit dự kiến và từ remote sau push |
+| P2 | cần CI và clone từ remote xác minh | checkout sạch cục bộ đã PASS; tiếp theo chạy Actions và clone remote sau push |
 | P3 | query/index và kích cỡ `GameSession` | đo tải và chia nhỏ theo luồng nghiệp vụ |
 
 ## 10. Lộ trình
