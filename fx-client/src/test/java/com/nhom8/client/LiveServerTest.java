@@ -21,11 +21,12 @@ public class LiveServerTest {
         AtomicBoolean loginSuccess = new AtomicBoolean(false);
         AtomicBoolean roomSuccess = new AtomicBoolean(false);
 
-        String testUsername = "user_" + (System.currentTimeMillis() % 100000);
+        String endpoint = args.length > 0 ? args[0] : "ws://localhost:8080/ws/game";
+        String testUsername = "user_" + java.util.UUID.randomUUID().toString().substring(0, 8);
         String testPassword = "mypassword123";
-        String testDisplayName = "Họa Sĩ Nhí " + (System.currentTimeMillis() % 1000);
+        String testDisplayName = "Hoa Si " + testUsername;
 
-        GameWebSocketClient client = new GameWebSocketClient("ws://localhost:8080/ws/game", env -> {
+        GameWebSocketClient client = new GameWebSocketClient(endpoint, env -> {
             System.out.println("[TEST NHẬN] " + env.getType() + " | success=" + env.isSuccess() + " | content=" + env.getContent());
 
             if (env.getType() == MessageType.REGISTER || env.getType() == MessageType.REGISTER_RESPONSE) {
@@ -45,7 +46,7 @@ public class LiveServerTest {
         });
 
         // 1. Kết nối
-        System.out.println("1. Đang kết nối tới ws://localhost:8080/ws/game...");
+        System.out.println("1. Đang kết nối tới " + endpoint + "...");
         client.connect().get(5, TimeUnit.SECONDS);
 
         // 2. Test Đăng ký

@@ -22,6 +22,7 @@ build/
 .env.*
 !.env.example
 /server/data/
+/data/
 node_modules/
 *.log
 *.trace.db
